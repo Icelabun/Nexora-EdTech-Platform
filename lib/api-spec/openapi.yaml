@@ -3,13 +3,23 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Nexora learning platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
-    description: Health operations
+    description: Health and readiness operations
+  - name: auth
+    description: Student, teacher, and admin accounts
+  - name: learning
+    description: Subjects, progress, and dungeon runs
+  - name: social
+    description: Leaderboards, tournaments, and classes
+  - name: tutor
+    description: AI tutor
+  - name: billing
+    description: Subscription selection and billing status
 paths:
   /healthz:
     get:
@@ -24,6 +34,446 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Create an account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: Account created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Sign out
+      responses:
+        "200":
+          description: Signed out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get the current account
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+  /subjects:
+    get:
+      operationId: getSubjects
+      tags: [learning]
+      summary: List EUEE subjects
+      responses:
+        "200":
+          description: Available subjects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Subject"
+  /onboarding:
+    post:
+      operationId: saveOnboarding
+      tags: [auth]
+      summary: Save weakest subjects
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardingInput"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+  /dashboard:
+    get:
+      operationId: getDashboard
+      tags: [learning]
+      summary: Get student progress and recent activity
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dashboard"
+  /dungeons:
+    post:
+      operationId: startDungeon
+      tags: [learning]
+      summary: Start a server-validated dungeon run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DungeonStartInput"
+      responses:
+        "201":
+          description: Dungeon started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DungeonQuestion"
+  /dungeons/{runId}/answer:
+    post:
+      operationId: answerDungeonQuestion
+      tags: [learning]
+      summary: Submit an answer; scoring is calculated on the server
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DungeonAnswerInput"
+      responses:
+        "200":
+          description: Answer result and next question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DungeonAnswerResult"
+  /dungeons/{runId}/abandon:
+    post:
+      operationId: abandonDungeon
+      tags: [learning]
+      summary: Reset a dungeon after leaving the active session
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Run abandoned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /dungeons/branch-choice:
+    post:
+      operationId: chooseDungeonBranch
+      tags: [learning]
+      summary: Save the one-time post-boss path choice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BranchChoiceInput"
+      responses:
+        "200":
+          description: Choice saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+  /leaderboards:
+    get:
+      operationId: getLeaderboards
+      tags: [social]
+      summary: Get a global or subject leaderboard
+      parameters:
+        - in: query
+          name: subject
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ranked students
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardEntry"
+  /tournaments:
+    get:
+      operationId: getTournaments
+      tags: [social]
+      summary: List open tournaments and payout breakdown
+      responses:
+        "200":
+          description: Tournament list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Tournament"
+  /tournaments/{tournamentId}/join:
+    post:
+      operationId: joinTournament
+      tags: [social]
+      summary: Enter a free or paid tournament
+      parameters:
+        - in: path
+          name: tournamentId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tournament entry status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TournamentEntry"
+  /tournaments/{tournamentId}/rounds/start:
+    post:
+      operationId: startTournamentRound
+      tags: [social]
+      summary: Start or resume the current timed tournament round
+      parameters:
+        - in: path
+          name: tournamentId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Current tournament question
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TournamentRoundQuestion"
+  /tournaments/{tournamentId}/rounds/answer:
+    post:
+      operationId: answerTournamentRound
+      tags: [social]
+      summary: Submit one answer in the active tournament round
+      parameters:
+        - in: path
+          name: tournamentId
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TournamentAnswerInput"
+      responses:
+        "200":
+          description: Authoritatively scored tournament answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TournamentAnswer"
+  /tournaments/{tournamentId}/leaderboard:
+    get:
+      operationId: getTournamentLeaderboard
+      tags: [social]
+      summary: List tournament standings ranked by points, speed, then accuracy
+      parameters:
+        - in: path
+          name: tournamentId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Tournament standings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TournamentScoreEntry"
+  /ai/tutor:
+    post:
+      operationId: askTutor
+      tags: [tutor]
+      summary: Ask the AI tutor a question
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TutorInput"
+      responses:
+        "200":
+          description: Tutor answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TutorReply"
+  /classes:
+    get:
+      operationId: getClasses
+      tags: [social]
+      summary: List teacher classes
+      responses:
+        "200":
+          description: Teacher classes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Class"
+    post:
+      operationId: createClass
+      tags: [social]
+      summary: Create a class and join code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClassInput"
+      responses:
+        "201":
+          description: Class created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Class"
+  /classes/join:
+    post:
+      operationId: joinClass
+      tags: [social]
+      summary: Join a teacher class with its code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClassJoinInput"
+      responses:
+        "200":
+          description: Joined class
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Class"
+  /classes/{classId}/students:
+    get:
+      operationId: getClassStudents
+      tags: [social]
+      summary: Get student engagement and subject performance
+      parameters:
+        - in: path
+          name: classId
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Student roster and performance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ClassStudent"
+  /assignments:
+    get:
+      operationId: getAssignments
+      tags: [teacher]
+      summary: List assignments for the signed-in teacher or student's classes
+      responses:
+        "200":
+          description: Assignments visible to the current account
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/StudentAssignment"
+    post:
+      operationId: createAssignment
+      tags: [social]
+      summary: Assign a dungeon to a class
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignmentInput"
+      responses:
+        "201":
+          description: Assignment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Assignment"
+  /subscriptions:
+    get:
+      operationId: getSubscription
+      tags: [billing]
+      summary: Get current subscription and pricing
+      responses:
+        "200":
+          description: Current subscription
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
+    post:
+      operationId: selectSubscription
+      tags: [billing]
+      summary: Select a subscription tier using mock billing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubscriptionInput"
+      responses:
+        "200":
+          description: Subscription status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Subscription"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +483,322 @@ components:
           type: string
       required:
         - status
+    Message:
+      type: object
+      properties:
+        message: { type: string }
+      required: [message]
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string, enum: [student, teacher, admin] }
+        grade: { type: integer }
+        school: { type: string }
+        xp: { type: integer }
+        level: { type: integer }
+        hunterRank: { type: string }
+        streak: { type: integer }
+        weakestSubjects:
+          type: array
+          items: { type: string }
+        subscriptionTier: { type: string }
+        onboardingComplete: { type: boolean }
+        arenaAccessUntil:
+          type: string
+          format: date-time
+          nullable: true
+        branchUnlocked: { type: boolean }
+        branchChoice:
+          type: string
+          enum: [solo, event, null]
+          nullable: true
+      required: [id, name, email, role, grade, school, xp, level, hunterRank, streak, weakestSubjects, subscriptionTier, onboardingComplete, arenaAccessUntil, branchUnlocked, branchChoice]
+    RegisterInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        grade: { type: integer, default: 12 }
+        school: { type: string }
+        role: { type: string, enum: [student, teacher, admin] }
+      required: [name, email, password, grade, school]
+    LoginInput:
+      type: object
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+      required: [email, password]
+    OnboardingInput:
+      type: object
+      properties:
+        weakestSubjects:
+          type: array
+          items: { type: string }
+          minItems: 1
+          maxItems: 6
+      required: [weakestSubjects]
+    Subject:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        questionCount: { type: integer }
+        mastery: { type: integer }
+      required: [id, name, questionCount, mastery]
+    Dashboard:
+      type: object
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        subjectMastery:
+          type: array
+          items:
+            type: object
+            properties:
+              subject: { type: string }
+              mastery: { type: integer }
+            required: [subject, mastery]
+        recentRuns:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunSummary"
+        dailyRunsRemaining: { type: integer }
+      required: [user, subjectMastery, recentRuns, dailyRunsRemaining]
+    RunSummary:
+      type: object
+      properties:
+        id: { type: string }
+        subject: { type: string }
+        rank: { type: string }
+        accuracy: { type: integer }
+        xpEarned: { type: integer }
+        completedAt: { type: string }
+      required: [id, subject, rank, accuracy, xpEarned, completedAt]
+    DungeonStartInput:
+      type: object
+      properties:
+        subject: { type: string }
+        rank: { type: string, enum: [E, D, C, B, A, S] }
+      required: [subject, rank]
+    DungeonQuestion:
+      type: object
+      properties:
+        runId: { type: string }
+        subject: { type: string }
+        rank: { type: string }
+        questionId: { type: string }
+        prompt: { type: string }
+        options:
+          type: array
+          items: { type: string }
+        questionNumber: { type: integer }
+        totalQuestions: { type: integer }
+        isBoss: { type: boolean }
+        playerHp: { type: integer }
+        enemyHp: { type: integer }
+      required: [runId, subject, rank, questionId, prompt, options, questionNumber, totalQuestions, isBoss, playerHp, enemyHp]
+    DungeonAnswerInput:
+      type: object
+      properties:
+        questionId: { type: string }
+        answerIndex: { type: integer, minimum: 0, maximum: 3 }
+      required: [questionId, answerIndex]
+    BranchChoiceInput:
+      type: object
+      properties:
+        choice: { type: string, enum: [solo, event] }
+      required: [choice]
+    DungeonAnswerResult:
+      type: object
+      properties:
+        correct: { type: boolean }
+        explanation: { type: string }
+        playerHp: { type: integer }
+        enemyHp: { type: integer }
+        xpEarned: { type: integer }
+        completed: { type: boolean }
+        accuracy: { type: integer }
+        levelUp: { type: boolean }
+        hunterRank: { type: string }
+        branchUnlocked: { type: boolean }
+        nextQuestion:
+          anyOf:
+            - $ref: "#/components/schemas/DungeonQuestion"
+            - type: "null"
+      required: [correct, explanation, playerHp, enemyHp, xpEarned, completed, accuracy, levelUp, hunterRank, branchUnlocked, nextQuestion]
+    LeaderboardEntry:
+      type: object
+      properties:
+        position: { type: integer }
+        name: { type: string }
+        school: { type: string }
+        xp: { type: integer }
+        hunterRank: { type: string }
+      required: [position, name, school, xp, hunterRank]
+    Tournament:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        subject: { type: string }
+        paid: { type: boolean }
+        entryFeeEtb: { type: integer }
+        participants: { type: integer }
+        prizePoolEtb: { type: integer }
+        joined: { type: boolean }
+        completed: { type: boolean }
+        totalRounds: { type: integer }
+        roundDurationSeconds: { type: integer }
+        payoutBreakdown:
+          type: array
+          items: { type: string }
+        startsAt: { type: string }
+      required: [id, name, subject, paid, entryFeeEtb, participants, prizePoolEtb, payoutBreakdown, startsAt, joined, completed, totalRounds, roundDurationSeconds]
+    TournamentEntry:
+      type: object
+      properties:
+        tournamentId: { type: string }
+        joined: { type: boolean }
+        paymentStatus: { type: string }
+        message: { type: string }
+      required: [tournamentId, joined, paymentStatus, message]
+    TournamentRoundQuestion:
+      type: object
+      properties:
+        tournamentId: { type: string }
+        roundNumber: { type: integer }
+        totalRounds: { type: integer }
+        roundTitle: { type: string }
+        rank: { type: string }
+        timeRemainingSeconds: { type: integer }
+        questionId: { type: string }
+        questionNumber: { type: integer }
+        totalQuestions: { type: integer }
+        prompt: { type: string }
+        options:
+          type: array
+          items: { type: string }
+        isBoss: { type: boolean }
+      required: [tournamentId, roundNumber, totalRounds, roundTitle, rank, timeRemainingSeconds, questionId, questionNumber, totalQuestions, prompt, options, isBoss]
+    TournamentAnswerInput:
+      type: object
+      properties:
+        questionId: { type: string }
+        answerIndex: { type: integer, minimum: 0, maximum: 3 }
+      required: [questionId, answerIndex]
+    TournamentAnswer:
+      type: object
+      properties:
+        correct: { type: boolean }
+        explanation: { type: string }
+        pointsAwarded: { type: integer }
+        totalPoints: { type: integer }
+        accuracy: { type: integer }
+        roundComplete: { type: boolean }
+        tournamentComplete: { type: boolean }
+        nextQuestion:
+          allOf:
+            - $ref: "#/components/schemas/TournamentRoundQuestion"
+          nullable: true
+        message: { type: string }
+      required: [correct, explanation, pointsAwarded, totalPoints, accuracy, roundComplete, tournamentComplete, nextQuestion, message]
+    TournamentScoreEntry:
+      type: object
+      properties:
+        position: { type: integer }
+        name: { type: string }
+        school: { type: string }
+        points: { type: integer }
+        timeSeconds: { type: number }
+        accuracy: { type: integer }
+        completed: { type: boolean }
+      required: [position, name, school, points, timeSeconds, accuracy, completed]
+    TutorInput:
+      type: object
+      properties:
+        message: { type: string, minLength: 1, maxLength: 3000 }
+        subject: { type: string }
+        context: { type: string }
+      required: [message]
+    TutorReply:
+      type: object
+      properties:
+        answer: { type: string }
+      required: [answer]
+    Class:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        joinCode: { type: string }
+        studentCount: { type: integer }
+        averageMastery: { type: integer }
+      required: [id, name, joinCode, studentCount, averageMastery]
+    ClassInput:
+      type: object
+      properties:
+        name: { type: string, minLength: 2 }
+      required: [name]
+    ClassJoinInput:
+      type: object
+      properties:
+        joinCode: { type: string, minLength: 4 }
+      required: [joinCode]
+    ClassStudent:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        school: { type: string }
+        xp: { type: integer }
+        hunterRank: { type: string }
+        subjectMastery:
+          type: object
+          additionalProperties: { type: integer }
+      required: [id, name, school, xp, hunterRank, subjectMastery]
+    Assignment:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        classId: { type: string }
+        subject: { type: string }
+        rank: { type: string }
+        dueAt: { type: string }
+      required: [id, title, classId, subject, rank, dueAt]
+    StudentAssignment:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        classId: { type: string }
+        className: { type: string }
+        subject: { type: string }
+        rank: { type: string }
+        dueAt: { type: string }
+      required: [id, title, classId, className, subject, rank, dueAt]
+    AssignmentInput:
+      type: object
+      properties:
+        title: { type: string, minLength: 2 }
+        classId: { type: string }
+        subject: { type: string }
+        rank: { type: string, enum: [E, D, C, B, A, S] }
+        dueAt: { type: string }
+      required: [title, classId, subject, rank, dueAt]
+    Subscription:
+      type: object
+      properties:
+        tier: { type: string, enum: [free, arena, institution] }
+        priceEtb: { type: integer }
+        billingStatus: { type: string }
+      required: [tier, priceEtb, billingStatus]
+    SubscriptionInput:
+      type: object
+      properties:
+        tier: { type: string, enum: [free, arena, institution] }
+      required: [tier]
 
