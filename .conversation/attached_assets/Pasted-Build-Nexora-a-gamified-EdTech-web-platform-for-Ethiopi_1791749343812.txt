@@ -1,0 +1,81 @@
+Build "Nexora", a gamified EdTech web platform for Ethiopian Grade 12 students preparing for the EUEE / national matric exam. Build a working MVP from scratch using the MERN stack (MongoDB with Mongoose, Express, React + Vite, Node). Use Tailwind CSS on the frontend and JWT auth. Read MONGODB_URI, JWT_SECRET and AI_API_KEY from environment secrets. Never hardcode them.
+
+## CORE POSITIONING
+Exam urgency stays in the background. The product should feel like freedom, something students WANT to open, not a chore. Copy is energetic and confident, never nagging or fear-based.
+
+## VISUAL IDENTITY
+- Dark luxury: obsidian background (#0A0A0C), surface (#131318), gold accent (#C9A227, hover #E5BE4A), off-white text (#EDEDED)
+- Typography: a refined serif for headings (Playfair Display or Cormorant), clean sans for body (Inter)
+- Geometric "N" monogram logo (build as inline SVG, gold on obsidian)
+- Subtle gold glow on key interactive elements, smooth micro-animations, fully responsive and mobile-first (most users are on phones)
+
+## USER ROLES
+Student, Teacher, Admin. Email + password registration and login (bcrypt, JWT in httpOnly cookie). Include a role-based route guard.
+
+## FEATURES (build in this priority order)
+
+### 1. Auth + Onboarding
+- Register: name, email, password, grade (default 12), school
+- Onboarding picks the student's weakest subjects (EUEE subjects: Math, Physics, Chemistry, Biology, English, Aptitude)
+
+### 2. Dungeon Mode (Solo Leveling spine, the main game loop)
+- Student chooses a Subject and a Rank (E, D, C, B, A, S)
+- A dungeon = a sequence of quiz questions; each correct answer defeats an orc (animated hit + HP bar drop); wrong answers cost the player HP
+- Final question = Boss (higher difficulty, animated boss sprite via CSS/SVG)
+- Rewards: XP, level-ups, hunter rank progression (E to S)
+- ANTI-CHEAT: if the user leaves the tab or window during a session (Page Visibility API + blur event), the dungeon run resets with a clear message
+- Server validates answers and calculates XP. The client never decides scoring.
+- Branching unlock: if a student beats their first dungeon boss with 95%+ accuracy, show a one-time "Two Doors" choice: (A) continue the Solo Leveling path, or (B) enter the Supernatural "In-Event Event", a timed ~1 hour detective-style investigation where solving academic equations reveals leads. Build the door-choice flow and a stub event screen for now.
+
+### 3. AI Tutor (also the game master)
+- Chat interface where students ask for explanations on any subject
+- Endpoint /api/ai/tutor calls the AI provider server-side using AI_API_KEY
+- System prompt: the AI acts as a supportive game master, explains step by step, adapts to Grade 12 EUEE level, gives personalized feedback after dungeon runs (what they missed and why)
+- Rate-limit per user
+
+### 4. Tournaments
+- Free Tournaments: rewards are XP, rank badges, and temporary premium access
+- Paid Tournaments: entry fee 50 ETB per participant
+  - Prize pool = 50 x number of paid participants (paid only from collected fees)
+  - 25 or fewer participants: 1st gets 40%, 2nd gets 20%, Nexora keeps 40%
+  - More than 25 participants: 1st gets 35%, 2nd gets 15%, 3rd gets 10%, Nexora keeps 40%
+  - Show the live prize pool and payout breakdown on the tournament page
+- Multi-round, timed, subject-specific rounds of increasing difficulty
+- Leaderboard ranked by total points, then speed, then accuracy
+- Payments: build a payment abstraction layer with a mock provider now, structured so Telebirr/Chapa can be plugged in later
+
+### 5. Progress + Leaderboards
+- Student dashboard: XP, level, hunter rank, streak, subject mastery bars, recent dungeon history
+- Global and per-subject leaderboards
+
+### 6. Teacher Dashboard
+- Create classes with join codes, view student engagement and per-subject performance, assign dungeons or quizzes with due dates
+
+### 7. Subscription Tiers (UI + gating logic, mock billing)
+- Free: limited dungeon runs per day, basic tutor access, free tournaments
+- Arena Pass: 100 to 300 ETB/month (use 150 ETB as the default), full access to all subjects, unlimited dungeons, full AI tutor, paid tournaments
+- Institution: school-wide plan with the teacher dashboard
+- Show pricing in ETB
+
+### 8. Email notifications (stub with nodemailer-ready service)
+- Welcome email on registration, assignment notification to students
+
+## DATA MODELS (Mongoose)
+User, Subject, Question (subject, rank, difficulty, options, correctAnswer, explanation), DungeonRun, Tournament, TournamentEntry, Class, Assignment, Subscription, Payment, AITutorSession.
+
+## SEED DATA
+Seed 15 questions per subject across ranks for Math, Physics, Chemistry, Biology, and English at the Ethiopian Grade 12 level. Include one demo student, one teacher, and one admin account. Mark clearly in the README that questions are sample placeholders to be replaced by vetted content.
+
+## ARCHITECTURE
+- /client (React + Vite + Tailwind), /server (Express), shared .env pattern
+- REST API with a clean controller/route/service structure, input validation (zod or joi), helmet, CORS, and rate limiting
+- Add a global error handler and /api/health endpoint (backend stability is the top pre-launch priority, so build in logging and graceful error handling from day one)
+- Configure Replit so one Run command starts both client and server, with the client proxying /api to the server
+
+## LANDING PAGE
+Hero with the Nexora monogram, a headline about studying that feels like play, "Start Your Hunt" CTA, a feature section (Dungeons, AI Tutor, Tournaments), pricing in ETB, and a footer. Obsidian and gold throughout.
+
+## DELIVERABLES
+Working app running on Replit, README with setup steps and env variable list, and a short list of what is stubbed (payments, email, Supernatural event) versus fully built.
+
+Start with the project scaffold, auth, the landing page and the Dungeon Mode loop first, then continue through the remaining features in order.
