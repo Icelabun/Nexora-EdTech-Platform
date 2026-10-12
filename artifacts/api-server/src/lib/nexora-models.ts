@@ -1,4 +1,6 @@
-import { model, models, Schema } from "mongoose";
+import mongoose from "mongoose";
+
+const { model, models, Schema } = mongoose;
 
 const userSchema = new Schema(
   {
@@ -102,6 +104,7 @@ const tournamentEntrySchema = new Schema(
     correctCount: { type: Number, default: 0 },
     answeredCount: { type: Number, default: 0 },
     completed: { type: Boolean, default: false },
+    rankBadge: { type: String, default: null },
     completedAt: { type: Date, default: null },
   },
   { timestamps: true },

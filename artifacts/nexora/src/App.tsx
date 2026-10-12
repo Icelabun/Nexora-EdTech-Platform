@@ -3,15 +3,15 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import { ArrowDownRight, ArrowRight, BookOpen, Check, ChevronRight, Crown, LockKeyhole, LogOut, MessageCircle, Shield, Swords, Trophy } from 'lucide-react';
 import {
-  getGetClassesQueryKey, getGetClassStudentsQueryKey, getGetCurrentUserQueryKey, getGetDashboardQueryKey,
+  getGetAssignmentsQueryKey, getGetClassesQueryKey, getGetClassStudentsQueryKey, getGetCurrentUserQueryKey, getGetDashboardQueryKey,
   getGetSubscriptionQueryKey, getGetTournamentLeaderboardQueryKey, getGetTournamentsQueryKey, useAbandonDungeon,
   useAnswerDungeonQuestion, useAnswerTournamentRound, useAskTutor, useCreateAssignment, useCreateClass, useGetClasses,
   useChooseDungeonBranch, useGetClassStudents, useGetCurrentUser, useGetDashboard,
-  useGetLeaderboards, useGetSubjects, useGetSubscription, useGetTournamentLeaderboard, useGetTournaments,
+  useGetAssignments, useGetLeaderboards, useGetSubjects, useGetSubscription, useGetTournamentLeaderboard, useGetTournaments,
   useJoinClass, useJoinTournament, useLogin, useLogout, useRegister, useSaveOnboarding,
   useSelectSubscription, useStartDungeon, useStartTournamentRound,
 } from '@workspace/api-client-react';
-import type { DungeonQuestion, Subject, Tournament, TournamentRoundQuestion, User } from '@workspace/api-client-react';
+import type { DungeonQuestion, StudentAssignment, Subject, Tournament, TournamentAnswer, TournamentRoundQuestion, User } from '@workspace/api-client-react';
 import NotFound from '@/pages/not-found';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 20_000 } } });
@@ -153,6 +153,7 @@ function Onboarding() {
 
 function JoinClassPanel() {
   const join = useJoinClass();
+  const qc = useQueryClient();
   const [code,setCode] = useState('');
   const [notice,setNotice] = useState('');
   const [joined,setJoined] = useState<{name:string;joinCode:string}|null>(null);
@@ -162,6 +163,7 @@ function JoinClassPanel() {
     try {
       const classInfo = await join.mutateAsync({data:{joinCode:code.trim().toUpperCase()}});
       setJoined({name:classInfo.name,joinCode:classInfo.joinCode});
+      void qc.invalidateQueries({queryKey:getGetAssignmentsQueryKey()});
       setNotice(`You are in ${classInfo.name}.`);
       setCode('');
     } catch (err) {
@@ -180,6 +182,23 @@ function JoinClassPanel() {
   </section>;
 }
 
+function AssignmentPanel() {
+  const {data,isLoading,isError,refetch}=useGetAssignments();
+  const [,setLocation]=useLocation();
+  function openAssignment(assignment:StudentAssignment) {
+    setLocation(`/dungeon?subject=${encodeURIComponent(assignment.subject)}&rank=${encodeURIComponent(assignment.rank)}`);
+  }
+  return <section className="panel" style={{marginTop:16}}>
+    <div className="panel-title"><h2>Class assignments</h2><small>YOUR NEXT OBJECTIVES</small></div>
+    {isLoading?<Loading rows={2}/>:isError?<LoadError retry={()=>void refetch()}/>:!data?.length
+      ?<div className="empty-state"><strong>No assignments yet</strong>Join a class with your teacher’s code to see assigned practice here.</div>
+      :data.map(assignment=><div className="list-row" key={assignment.id}>
+        <div><strong>{assignment.title}</strong><small>{assignment.className} · {assignment.subject} · {assignment.rank}-Rank · due {new Date(assignment.dueAt).toLocaleString()}</small></div>
+        <button className="btn btn-quiet" style={{padding:'8px 10px',flexShrink:0}} onClick={()=>openAssignment(assignment)} data-testid={`button-assignment-${assignment.id}`}>Practice <ArrowRight size={13}/></button>
+      </div>)}
+  </section>;
+}
+
 function DashboardPage() {
   const {data,isLoading,isError,refetch}=useGetDashboard();
   if(isLoading)return <Content><PageHead kicker="Your command center" title="Loading your dossier…"/><Loading/></Content>;
@@ -188,20 +207,24 @@ function DashboardPage() {
   return <Content><div className="panel dashboard-hero"><div><div className="eyebrow">Your next move</div><h2>Good to see you,<br/>{user.name.split(' ')[0]}.</h2><p>Your path is yours to shape. One run at a time.</p><Link href="/dungeon" className="btn btn-gold" style={{marginTop:12}}>Enter a dungeon <Swords size={15}/></Link><div className="statline"><span><b>{user.xp.toLocaleString()} XP</b>Total experience</span><span><b>{user.streak} days</b>Current streak</span><span><b>{dailyRunsRemaining}</b>Runs remaining today</span></div></div><div className="level-disc"><div><small>HUNTER RANK</small><strong>{user.hunterRank}</strong><small>LEVEL {user.level}</small></div></div></div>
     <div className="grid-2" style={{marginTop:16}}><section className="panel"><div className="panel-title"><h2>Subject mastery</h2><small>YOUR SKILL MAP</small></div>{subjectMastery.length?subjectMastery.map((s,i)=><div className="subject-line" key={`${s.subject}-${i}`}><div><strong>{s.subject}</strong><div className="meter"><i style={{width:`${Math.max(0,Math.min(100,s.mastery))}%`}}/></div></div><small>{s.mastery}%</small></div>):<div className="empty-state"><strong>First steps count</strong>Your subject map will take shape after a few runs.</div>}</section>
        <section className="panel"><div className="panel-title"><h2>Recent runs</h2><small>FIELD NOTES</small></div>{recentRuns.length?recentRuns.slice(0,5).map(run=><div className="list-row" key={run.id}><div><strong>{run.subject} · {run.rank}-Rank</strong><small>{new Date(run.completedAt).toLocaleDateString()}</small></div><span className="mono gold">+{run.xpEarned} XP</span></div>):<div className="empty-state"><strong>Fresh slate</strong>Your completed runs will appear here.</div>}</section></div>
-    <JoinClassPanel/>
+    <AssignmentPanel/><JoinClassPanel/>
   </Content>;
 }
 function Content({children}:{children:ReactNode}){return <main className="content">{children}</main>;}
 
 function DungeonPage() {
+  const {data:user}=useGetCurrentUser();
   const {data:subjects,isLoading:subjectsLoading,isError:subjectsError,refetch}=useGetSubjects();
   const start=useStartDungeon(); const answer=useAnswerDungeonQuestion(); const abandon=useAbandonDungeon(); const chooseBranch=useChooseDungeonBranch(); const qc=useQueryClient();const [,setLocation]=useLocation();
-  const [subject,setSubject]=useState('');const [rank,setRank]=useState('E');const [question,setQuestion]=useState<DungeonQuestion|null>(null);const [answerIndex,setAnswerIndex]=useState<number|null>(null);const [result,setResult]=useState<Awaited<ReturnType<typeof answer.mutateAsync>>|null>(null);const [error,setError]=useState('');const [branch,setBranch]=useState(false);const [branchChoiceResolved,setBranchChoiceResolved]=useState(false);const [branchError,setBranchError]=useState('');const [resetNotice,setResetNotice]=useState('');
+  const initialParams=new URLSearchParams(window.location.search);
+  const [subject,setSubject]=useState(initialParams.get('subject')??'');const [rank,setRank]=useState(initialParams.get('rank')??'E');const [question,setQuestion]=useState<DungeonQuestion|null>(null);const [answerIndex,setAnswerIndex]=useState<number|null>(null);const [result,setResult]=useState<Awaited<ReturnType<typeof answer.mutateAsync>>|null>(null);const [error,setError]=useState('');const [branch,setBranch]=useState(false);const [branchChoiceResolved,setBranchChoiceResolved]=useState(false);const [branchError,setBranchError]=useState('');const [resetNotice,setResetNotice]=useState('');
+  useEffect(()=>{if(user?.branchUnlocked&&!user.branchChoice&&!branchChoiceResolved){setBranch(true);}},[user?.branchUnlocked,user?.branchChoice,branchChoiceResolved]);
   useEffect(()=>{if(!question)return;const reset=()=>{if(document.visibilityState==='hidden'){abandon.mutate({runId:question.runId});setQuestion(null);setResult(null);setResetNotice('The run was reset because the session left focus. Your next attempt starts fresh.');}};const blur=()=>{abandon.mutate({runId:question.runId});setQuestion(null);setResult(null);setResetNotice('The run was reset when focus left the arena. Start a fresh run when ready.');};document.addEventListener('visibilitychange',reset);window.addEventListener('blur',blur);return()=>{document.removeEventListener('visibilitychange',reset);window.removeEventListener('blur',blur)}},[question,abandon]);
   async function begin(){setError('');setResetNotice('');try{const q=await start.mutateAsync({data:{subject,rank:rank as 'E'|'D'|'C'|'B'|'A'|'S'}});setQuestion(q);setResult(null);setAnswerIndex(null);}catch(e){setError(e instanceof Error?e.message:'Could not open this dungeon. Try another route.');}}
   async function submit(index:number){if(!question||answer.isPending)return;setAnswerIndex(index);setError('');try{const r=await answer.mutateAsync({runId:question.runId,data:{questionId:question.questionId,answerIndex:index}});setResult(r);if(r.completed&&r.branchUnlocked&&r.accuracy>=95&&!branchChoiceResolved){setBranch(true);setBranchError('');}if(r.completed){qc.invalidateQueries({queryKey:getGetDashboardQueryKey()});qc.invalidateQueries({queryKey:getGetCurrentUserQueryKey()});}}catch(e){setError(e instanceof Error?e.message:'Answer did not reach the server. Try again.');setAnswerIndex(null);}}
-  async function selectBranch(choice:'solo'|'event'){if(chooseBranch.isPending||branchChoiceResolved)return;setBranchError('');try{await chooseBranch.mutateAsync({data:{choice}});setBranchChoiceResolved(true);setBranch(false);if(choice==='event')setLocation('/event');}catch(e){setBranchError(e instanceof Error?e.message:'Could not save your Two Doors choice. Try again.');}}
+  async function selectBranch(choice:'solo'|'event'){if(chooseBranch.isPending||branchChoiceResolved)return;setBranchError('');try{await chooseBranch.mutateAsync({data:{choice}});setBranchChoiceResolved(true);setBranch(false);void qc.invalidateQueries({queryKey:getGetCurrentUserQueryKey()});if(choice==='event')setLocation('/event');}catch(e){setBranchError(e instanceof Error?e.message:'Could not save your Two Doors choice. Try again.');}}
   function next(){if(result?.nextQuestion){setQuestion(result.nextQuestion);setResult(null);setAnswerIndex(null);}else{setQuestion(null);setResult(null);}}
+  const branchModal=branch?<div className="branch-modal"><div className="branch-box"><div className="eyebrow">A rare route has opened</div><h2>Two Doors</h2><p>You reached the 95% accuracy threshold. Choose your path once: continue solo, or enter the one-hour math and logic detective event.</p>{branchError&&<div className="form-error" role="alert">{branchError}</div>}<div style={{display:'flex',gap:10,flexWrap:'wrap'}}><button className="btn btn-quiet" disabled={chooseBranch.isPending} onClick={()=>void selectBranch('solo')} data-testid="button-branch-solo">Solo path</button><button className="btn btn-gold" disabled={chooseBranch.isPending} onClick={()=>void selectBranch('event')} data-testid="button-branch-event">{chooseBranch.isPending?'Saving choice…':'Enter the event'} <ArrowRight size={14}/></button></div></div></div>:null;
   if(!question)return <Content><PageHead kicker="The field" title="Choose your dungeon" copy="A focused five-question run. Choose your subject, set your rank, and make your next move."/>
     {resetNotice&&<div className="error-banner">{resetNotice}</div>}
     <div className="grid-2"><section className="panel"><div className="panel-title"><h2>01 / Subject</h2><small>CHOOSE YOUR TERRAIN</small></div>
@@ -210,7 +233,7 @@ function DungeonPage() {
       <div className="panel-title" style={{marginTop:25}}><h2>02 / Rank</h2><small>SET THE PACE</small></div><div className="rank-row">{ranks.map(r=><button key={r} onClick={()=>setRank(r)} className={`rank-btn ${rank===r?'selected':''}`} data-testid={`button-rank-${r}`}>{r}-RANK</button>)}</div>
       {error&&<div className="form-error">{error}</div>}<button className="btn btn-gold" disabled={!subject||start.isPending} onClick={()=>void begin()} data-testid="button-start-dungeon">{start.isPending?'Opening the gate…':'Enter the dungeon'} <Swords size={15}/></button>
     </section><aside className="panel"><div className="eyebrow">A quick briefing</div><h2 className="serif" style={{fontSize:28}}>Five questions.<br/>One clean run.</h2><p className="muted" style={{lineHeight:1.8,fontSize:13}}>Your HP, enemy HP, XP and outcomes are calculated by the server. Stay in the arena until your run resolves.</p><div className="list-row"><span>Session focus</span><Shield size={16} className="gold"/></div><div className="list-row"><span>Boss encounter</span><Swords size={16} className="gold"/></div><div className="list-row"><span>Progress saved server-side</span><LockKeyhole size={16} className="gold"/></div></aside></div>
-  </Content>;
+    {branchModal}</Content>;
   return <Content><PageHead kicker={`${question.subject} / ${question.rank}-Rank`} title={result?.completed?'Run complete':`Question ${question.questionNumber} of ${question.totalQuestions}`} copy="Stay in focus. Your progress is held by the arena."/>
     <div className="dungeon-top"><div className="hp-group"><div className="hp-label"><span>YOUR HP</span><span>{result?.playerHp??question.playerHp}</span></div><div className="hp-bar"><i style={{width:`${Math.max(0,Math.min(100,result?.playerHp??question.playerHp))}%`}}/></div></div><div className="hp-group"><div className="hp-label"><span>{question.isBoss?'BOSS':'ENEMY'} HP</span><span>{result?.enemyHp??question.enemyHp}</span></div><div className="hp-bar enemy"><i style={{width:`${Math.max(0,Math.min(100,result?.enemyHp??question.enemyHp))}%`}}/></div></div></div>
     <div className="boss-arena"><div className="boss-sigil"><Mark size={55}/></div><div className="boss-caption">{question.isBoss?'BOSS ENCOUNTER':'DUNGEON GUARDIAN'} · {question.rank} RANK</div></div>
@@ -220,7 +243,7 @@ function DungeonPage() {
         :<button className="btn btn-gold" onClick={next} style={{marginTop:10}}>Next question <ChevronRight size={15}/></button>}</>}
       {error&&<div className="form-error">{error}</div>}
     </div>
-    {branch&&<div className="branch-modal"><div className="branch-box"><div className="eyebrow">A rare route has opened</div><h2>Two Doors</h2><p>You reached the 95% accuracy threshold. Choose your path once: continue solo, or enter the one-hour math and logic detective event.</p>{branchError&&<div className="form-error" role="alert">{branchError}</div>}<div style={{display:'flex',gap:10,flexWrap:'wrap'}}><button className="btn btn-quiet" disabled={chooseBranch.isPending} onClick={()=>void selectBranch('solo')} data-testid="button-branch-solo">Solo path</button><button className="btn btn-gold" disabled={chooseBranch.isPending} onClick={()=>void selectBranch('event')} data-testid="button-branch-event">{chooseBranch.isPending?'Saving choice…':'Enter the event'} <ArrowRight size={14}/></button></div></div></div>}
+    {branchModal}
   </Content>;
 }
 
@@ -261,10 +284,125 @@ function TutorPage(){
 }
 
 function TournamentsPage(){
-  const {data,isLoading,isError,refetch}=useGetTournaments();const join=useJoinTournament();const qc=useQueryClient();const [notice,setNotice]=useState('');
-  async function enter(id:string){setNotice('');try{const r=await join.mutateAsync({tournamentId:id});setNotice(r.message||`Entry status: ${r.paymentStatus}`);qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});}catch(e){setNotice(e instanceof Error?e.message:'Could not join this event.');}}
-  return <Content><PageHead kicker="Live arena" title="Play for the climb." copy="Free events for the love of the game. Paid pools when you are ready for a bigger stage."/>
-    {notice&&<div className="form-error" role="status">{notice}</div>}{isLoading?<Loading/>:isError?<LoadError retry={()=>void refetch()}/>:!data?.length?<div className="empty-state"><strong>The arena is between rounds</strong>New events will show up here when they open.</div>:<div style={{display:'grid',gap:13}}>{(data??[]).map(t=><article className="panel tournament-card" key={t.id}><div><span className={`tag ${t.paid?'':'muted-tag'}`}>{t.paid?`Entry ${t.entryFeeEtb} ETB`:'Free entry'}</span><h3>{t.name}</h3><div className="tournament-stats"><span>SUBJECT<b>{t.subject}</b></span><span>PLAYERS<b>{t.participants.toLocaleString()}</b></span><span>PRIZE POOL<b>{t.prizePoolEtb.toLocaleString()} ETB</b></span><span>STARTS<b>{new Date(t.startsAt).toLocaleString()}</b></span></div>{t.payoutBreakdown?.length>0&&<p className="muted" style={{fontSize:11,marginBottom:0}}>Payout · {t.payoutBreakdown.join(' / ')}</p>}</div><button className="btn btn-gold" onClick={()=>void enter(t.id)} disabled={join.isPending} data-testid={`button-join-${t.id}`}>{join.isPending?'Entering…':t.paid?'Enter event':'Join free event'} <ArrowRight size={14}/></button></article>)}</div>}
+  const {data,isLoading,isError,refetch}=useGetTournaments();
+  const join=useJoinTournament();
+  const startRound=useStartTournamentRound();
+  const answerRound=useAnswerTournamentRound();
+  const qc=useQueryClient();
+  const [activeId,setActiveId]=useState<string|null>(null);
+  const [activeQuestion,setActiveQuestion]=useState<TournamentRoundQuestion|null>(null);
+  const [answerResult,setAnswerResult]=useState<TournamentAnswer|null>(null);
+  const [selectedAnswer,setSelectedAnswer]=useState<number|null>(null);
+  const [secondsLeft,setSecondsLeft]=useState(0);
+  const [notice,setNotice]=useState('');
+  const activeTournament=data?.find(t=>t.id===activeId);
+  const standings=useGetTournamentLeaderboard(activeId??'',{query:{queryKey:getGetTournamentLeaderboardQueryKey(activeId??''),enabled:Boolean(activeId),refetchInterval:5000}});
+
+  async function beginRound(id:string){
+    setActiveId(id);setNotice('');
+    try{
+      const question=await startRound.mutateAsync({tournamentId:id});
+      setActiveQuestion(question);setAnswerResult(null);setSelectedAnswer(null);setSecondsLeft(question.timeRemainingSeconds);
+    }catch(e){
+      setActiveQuestion(null);setAnswerResult(null);
+      setNotice(e instanceof Error?e.message:'Could not resume this round.');
+      void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
+      void qc.invalidateQueries({queryKey:getGetTournamentLeaderboardQueryKey(id)});
+    }
+  }
+  async function enter(t:Tournament){
+    setNotice('');
+    if(t.joined){
+      setActiveId(t.id);
+      if(t.completed){setActiveQuestion(null);setAnswerResult(null);return;}
+      await beginRound(t.id);
+      return;
+    }
+    try{
+      const response=await join.mutateAsync({tournamentId:t.id});
+      setNotice(response.message||`Entry status: ${response.paymentStatus}`);
+      setActiveId(t.id);
+      void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
+    }catch(e){setNotice(e instanceof Error?e.message:'Could not join this event.');}
+  }
+  async function submitAnswer(index:number){
+    if(!activeId||!activeQuestion||answerRound.isPending||secondsLeft<=0)return;
+    setSelectedAnswer(index);setNotice('');
+    try{
+      const result=await answerRound.mutateAsync({tournamentId:activeId,data:{questionId:activeQuestion.questionId,answerIndex:index}});
+      setAnswerResult(result);
+      void qc.invalidateQueries({queryKey:getGetTournamentLeaderboardQueryKey(activeId)});
+      if(result.tournamentComplete)void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
+    }catch(e){
+      setActiveQuestion(null);setAnswerResult(null);
+      setNotice(e instanceof Error?e.message:'The arena could not score that answer.');
+      void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
+      void qc.invalidateQueries({queryKey:getGetTournamentLeaderboardQueryKey(activeId)});
+    }
+  }
+  async function checkExpiredRound(){
+    if(!activeId)return;
+    try{
+      const question=await startRound.mutateAsync({tournamentId:activeId});
+      setActiveQuestion(question);setSecondsLeft(question.timeRemainingSeconds);
+      setNotice('The server confirmed the round is still open.');
+    }catch(e){
+      setActiveQuestion(null);setAnswerResult(null);
+      setNotice(e instanceof Error?e.message:'The round time has ended.');
+      void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
+      void qc.invalidateQueries({queryKey:getGetTournamentLeaderboardQueryKey(activeId)});
+    }
+  }
+  function advance(){
+    if(!answerResult)return;
+    if(answerResult.nextQuestion){
+      setActiveQuestion(answerResult.nextQuestion);
+      setSecondsLeft(answerResult.nextQuestion.timeRemainingSeconds);
+      setAnswerResult(null);setSelectedAnswer(null);return;
+    }
+    setActiveQuestion(null);setAnswerResult(null);
+    void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
+    void qc.invalidateQueries({queryKey:getGetTournamentLeaderboardQueryKey(activeId??'')});
+  }
+  useEffect(()=>{
+    if(!activeQuestion||answerResult)return;
+    let remaining=activeQuestion.timeRemainingSeconds;
+    setSecondsLeft(remaining);
+    const timer=window.setInterval(()=>{
+      remaining=Math.max(0,remaining-1);
+      setSecondsLeft(remaining);
+      if(remaining===0)window.clearInterval(timer);
+    },1000);
+    return()=>window.clearInterval(timer);
+  },[activeQuestion?.questionId,answerResult]);
+  const formatTime=(value:number)=>`${Math.floor(value/60).toString().padStart(2,'0')}:${(value%60).toString().padStart(2,'0')}`;
+
+  return <Content><PageHead kicker="Live arena" title="Play for the climb." copy="Join a free or paid event, then work through three server-timed rounds. Paid entries use mock billing; no real money is collected."/>
+    {notice&&<div className="error-banner" role="status">{notice}</div>}
+    {isLoading?<Loading/>:isError?<LoadError retry={()=>void refetch()}/>:!data?.length?<div className="empty-state"><strong>The arena is between rounds</strong>New events will show up here when they open.</div>:<div style={{display:'grid',gap:13}}>{data.map(t=><article className="panel tournament-card" key={t.id}>
+      <div><span className={`tag ${t.paid?'':'muted-tag'}`}>{t.paid?`Entry ${t.entryFeeEtb} ETB`:'Free entry'}</span>{t.completed&&<span className="tag" style={{marginLeft:7}}>COMPLETE</span>}
+        <h3>{t.name}</h3><div className="tournament-stats"><span>SUBJECT<b>{t.subject}</b></span><span>PLAYERS<b>{t.participants.toLocaleString()}</b></span><span>PRIZE POOL<b>{t.prizePoolEtb.toLocaleString()} ETB</b></span><span>ROUNDS<b>{t.totalRounds} · E / C / A</b></span></div>
+        {t.payoutBreakdown?.length>0&&<p className="muted" style={{fontSize:11,marginBottom:0}}>Rewards · {t.payoutBreakdown.join(' / ')}</p>}
+      </div><div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+        <button className="btn btn-quiet" style={{padding:'9px 12px'}} onClick={()=>{setActiveId(t.id);setActiveQuestion(null);setAnswerResult(null);}} data-testid={`button-standings-${t.id}`}>Standings</button>
+        <button className="btn btn-gold" onClick={()=>void enter(t)} disabled={join.isPending||startRound.isPending} data-testid={`button-join-${t.id}`}>{join.isPending?'Entering…':!t.joined?(t.paid?'Enter · mock payment':'Join free event'):t.completed?'View final board':'Start / resume'} <ArrowRight size={14}/></button>
+      </div>
+    </article>)}</div>}
+
+    {activeId&&<section className="panel" style={{marginTop:16}}><div className="panel-title"><div><h2>{activeTournament?.name??'Tournament field'}</h2><small>{activeTournament?.joined?'YOUR ENTRY':'LIVE STANDINGS'}</small></div><button className="btn btn-quiet" style={{padding:'8px 10px'}} onClick={()=>{setActiveId(null);setActiveQuestion(null);setAnswerResult(null);}}>Close</button></div>
+      {activeQuestion&&<div className="panel" style={{marginBottom:16,background:'#101014'}}>
+        <div className="list-row" style={{paddingTop:0}}><div><div className="eyebrow">{activeQuestion.roundTitle} · {activeQuestion.rank}-Rank · Round {activeQuestion.roundNumber}/{activeQuestion.totalRounds}</div><strong>Question {activeQuestion.questionNumber} of {activeQuestion.totalQuestions}</strong></div><div className={`mono ${secondsLeft<60?'gold':''}`} style={{fontSize:20}}>{formatTime(secondsLeft)}</div></div>
+        <p className="question">{activeQuestion.prompt}</p>
+        <div>{activeQuestion.options.map((option,index)=><button key={`${activeQuestion.questionId}-${index}`} className={`option ${selectedAnswer===index?'chosen':''}`} disabled={Boolean(answerResult)||answerRound.isPending||secondsLeft===0} onClick={()=>void submitAnswer(index)} data-testid={`button-tournament-answer-${index}`}><span className="option-key">{String.fromCharCode(65+index)}</span>{option}</button>)}</div>
+        {answerRound.isPending&&<p className="muted">The arena is scoring your answer…</p>}
+        {secondsLeft===0&&!answerResult&&<button className="btn btn-quiet" onClick={()=>void checkExpiredRound()} disabled={startRound.isPending}>{startRound.isPending?'Checking the clock…':'Check expired round'}</button>}
+        {answerResult&&<><div className="explanation"><strong>{answerResult.correct?'Correct move.':'The arena teaches, too.'}</strong> {answerResult.explanation}<div className="mono gold" style={{marginTop:7}}>+{answerResult.pointsAwarded} points · {answerResult.totalPoints} total · {answerResult.accuracy}% accuracy</div><div className="muted" style={{marginTop:7,fontSize:12}}>{answerResult.message}</div></div>
+          <button className="btn btn-gold" style={{marginTop:10}} onClick={advance}>{answerResult.tournamentComplete?'View final standings':answerResult.roundComplete?'Start next round':'Next question'} <ArrowRight size={14}/></button></>}
+      </div>}
+      {!activeQuestion&&activeTournament?.joined&&!activeTournament.completed&&<div className="empty-state" style={{marginBottom:15}}><strong>Ready for your next round?</strong>Each round has its own five-minute clock. The server resumes your current round if you leave and return.<div><button className="btn btn-gold" style={{marginTop:12}} onClick={()=>void beginRound(activeTournament.id)} disabled={startRound.isPending}>{startRound.isPending?'Opening round…':'Start / resume round'} <ArrowRight size={14}/></button></div></div>}
+      <div className="panel-title"><h2>Standings</h2><small>POINTS · SPEED · ACCURACY</small></div>
+      {standings.isLoading?<Loading rows={2}/>:standings.isError?<LoadError retry={()=>void standings.refetch()}/>:!standings.data?.length?<div className="empty-state"><strong>No scores yet</strong>Finish a round to put your name on the board.</div>:<div style={{overflowX:'auto'}}><table className="table"><thead><tr><th>Position</th><th>Hunter</th><th>School</th><th>Points</th><th>Time</th><th>Accuracy</th><th>Badge</th></tr></thead><tbody>{standings.data.map(row=><tr key={`${row.position}-${row.name}`}><td className="rank-number">#{row.position.toString().padStart(2,'0')}</td><td><strong>{row.name}</strong></td><td>{row.school}</td><td className="mono gold">{row.points.toLocaleString()}</td><td>{formatTime(row.timeSeconds)}</td><td>{row.accuracy}%</td><td>{row.rankBadge??'—'}</td></tr>)}</tbody></table></div>}
+    </section>}
   </Content>;
 }
 
@@ -278,11 +416,11 @@ function LeaderboardPage(){
 }
 
 function TeacherPage(){
-  const {data:classes,isLoading,isError,refetch}=useGetClasses();const createClass=useCreateClass();const createAssignment=useCreateAssignment();const {data:subjects}=useGetSubjects();const qc=useQueryClient();const [notice,setNotice]=useState('');const [assignment,setAssignment]=useState<{title:string;classId:string;subject:string;rank:string;dueAt:string}>({title:'',classId:'',subject:'',rank:'E',dueAt:''});const [created,setCreated]=useState<{id:string;title:string;dueAt:string}[]>([]);
+  const {data:classes,isLoading,isError,refetch}=useGetClasses();const createClass=useCreateClass();const createAssignment=useCreateAssignment();const {data:subjects}=useGetSubjects();const {data:publishedAssignments,refetch:refetchAssignments}=useGetAssignments();const qc=useQueryClient();const [notice,setNotice]=useState('');const [assignment,setAssignment]=useState<{title:string;classId:string;subject:string;rank:string;dueAt:string}>({title:'',classId:'',subject:'',rank:'E',dueAt:''});
   const [activeClassId,setActiveClassId]=useState('');
   const roster=useGetClassStudents(activeClassId,{query:{enabled:Boolean(activeClassId),queryKey:getGetClassStudentsQueryKey(activeClassId)}});
   async function addClass(e:FormEvent<HTMLFormElement>){e.preventDefault();const fd=new FormData(e.currentTarget);setNotice('');try{await createClass.mutateAsync({data:{name:String(fd.get('name'))}});e.currentTarget.reset();qc.invalidateQueries({queryKey:getGetClassesQueryKey()});setNotice('Your class is ready. Share its join code with students.');}catch(err){setNotice(err instanceof Error?err.message:'Could not create the class.');}}
-  async function addAssignment(e:FormEvent){e.preventDefault();setNotice('');try{const result=await createAssignment.mutateAsync({data:{...assignment,rank:assignment.rank as 'E'|'D'|'C'|'B'|'A'|'S',dueAt:new Date(assignment.dueAt).toISOString()}});setCreated(c=>[result,...c]);setAssignment(a=>({...a,title:''}));setNotice('Assignment published to the class.');}catch(err){setNotice(err instanceof Error?err.message:'Could not publish this assignment.');}}
+  async function addAssignment(e:FormEvent){e.preventDefault();setNotice('');try{await createAssignment.mutateAsync({data:{...assignment,rank:assignment.rank as 'E'|'D'|'C'|'B'|'A'|'S',dueAt:new Date(assignment.dueAt).toISOString()}});void qc.invalidateQueries({queryKey:getGetAssignmentsQueryKey()});void refetchAssignments();setAssignment(a=>({...a,title:''}));setNotice('Assignment published to the class.');}catch(err){setNotice(err instanceof Error?err.message:'Could not publish this assignment.');}}
   const classList=classes??[];
   return <Content><PageHead kicker="Teacher field kit" title="Your classes, in motion." copy="Create a class, share the join code, and set a focused dungeon assignment."/>
     {notice&&<div className="error-banner" role="status">{notice}</div>}
@@ -300,14 +438,14 @@ function TeacherPage(){
         {Object.entries(student.subjectMastery).length?Object.entries(student.subjectMastery).map(([subject,mastery])=><div className="subject-line" key={`${student.id}-${subject}`}><div><strong>{subject}</strong><div className="meter"><i style={{width:`${Math.max(0,Math.min(100,mastery))}%`}}/></div></div><small>{mastery}%</small></div>):<p className="muted" style={{fontSize:12}}>Subject mastery will appear after this student completes a run.</p>}
       </article>)}</div>}
     </section>}
-    {!!created.length&&<section className="panel" style={{marginTop:16}}><div className="panel-title"><h2>Recently published</h2><small>THIS SESSION</small></div>{created.map(a=><div className="list-row" key={a.id}><strong>{a.title}</strong><span className="muted">{new Date(a.dueAt).toLocaleString()}</span></div>)}</section>}
+    <section className="panel" style={{marginTop:16}}><div className="panel-title"><h2>Published assignments</h2><small>PERSISTED</small></div>{!publishedAssignments?.length?<div className="empty-state"><strong>No assignments published</strong>Assignments you publish will stay available here and in your students’ dashboards.</div>:publishedAssignments.map(a=><div className="list-row" key={a.id}><div><strong>{a.title}</strong><small>{a.className} · {a.subject} · {a.rank}-Rank</small></div><span className="muted">Due {new Date(a.dueAt).toLocaleString()}</span></div>)}</section>
   </Content>;
 }
 
 function SubscriptionPage(){
-  const {data:current,isLoading,isError,refetch}=useGetSubscription();const select=useSelectSubscription();const qc=useQueryClient();const [notice,setNotice]=useState('');
+  const {data:current,isLoading,isError,refetch}=useGetSubscription();const {data:user}=useGetCurrentUser();const select=useSelectSubscription();const qc=useQueryClient();const [notice,setNotice]=useState('');
   async function choose(tier:'free'|'arena'|'institution'){setNotice('');try{const s=await select.mutateAsync({data:{tier}});qc.setQueryData(getGetSubscriptionQueryKey(),s);setNotice(`Your ${s.tier} plan is selected. Billing status: ${s.billingStatus}.`);}catch(e){setNotice(e instanceof Error?e.message:'Could not update your plan.');}}
-  const plans=[{tier:'free' as const,name:'Free path',price:'0',detail:'Get in, get moving.',features:['Daily dungeon runs','Subject mastery map','Tutor game-master chat']},{tier:'arena' as const,name:'Arena',price:'Current rate',detail:'For hunters building a steady streak.',features:['Everything in Free','Tournament entry access','Expanded practice sessions'],featured:true},{tier:'institution' as const,name:'Institution',price:'School plan',detail:'A shared field for a school.',features:['Teacher class tools','Assignments and join codes','School-wide progress view']}];
+  const plans=[{tier:'free' as const,name:'Free path',price:'0',detail:'Get in, get moving.',features:['Daily dungeon runs','Subject mastery map','Tutor game-master chat']},{tier:'arena' as const,name:'Arena',price:'150 ETB',detail:'For hunters building a steady streak.',features:['Everything in Free','Tournament entry access','Expanded practice sessions'],featured:true},{tier:'institution' as const,name:'Institution',price:'School plan',detail:'A shared field for a school.',features:['Teacher class tools','Assignments and join codes','School-wide progress view']}].filter(p=>p.tier!=='institution'||user?.role==='teacher');
   return <Content><PageHead kicker="Choose your pace" title="Room to go further." copy="A plan should open doors—not add pressure. Start with the path that fits today."/>
     {isLoading?<Loading/>:isError?<LoadError retry={()=>void refetch()}/>:<div className="panel" style={{marginBottom:17}}>Current plan <strong className="gold" style={{marginLeft:10}}>{current?.tier??'Free'}</strong><span className="muted" style={{marginLeft:10}}>· {current?.billingStatus??'ready'}</span>{current?.priceEtb ? <span className="mono" style={{marginLeft:10}}>{current.priceEtb} ETB</span>:null}</div>}
     {notice&&<div className="error-banner" role="status">{notice}</div>}

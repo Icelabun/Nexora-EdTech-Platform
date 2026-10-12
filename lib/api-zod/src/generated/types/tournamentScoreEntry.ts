@@ -14,4 +14,5 @@ export interface TournamentScoreEntry {
   timeSeconds: number;
   accuracy: number;
   completed: boolean;
+  rankBadge: string | null;
 }

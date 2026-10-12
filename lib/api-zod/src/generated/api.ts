@@ -419,7 +419,8 @@ export const GetTournamentLeaderboardResponseItem = zod.object({
   "points": zod.number().int(),
   "timeSeconds": zod.number(),
   "accuracy": zod.number().int(),
-  "completed": zod.boolean()
+  "completed": zod.boolean(),
+  "rankBadge": zod.string().nullable()
 })
 export const GetTournamentLeaderboardResponse = zod.array(GetTournamentLeaderboardResponseItem)
 

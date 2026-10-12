@@ -715,7 +715,8 @@ components:
         timeSeconds: { type: number }
         accuracy: { type: integer }
         completed: { type: boolean }
-      required: [position, name, school, points, timeSeconds, accuracy, completed]
+        rankBadge: { type: string, nullable: true }
+      required: [position, name, school, points, timeSeconds, accuracy, completed, rankBadge]
     TutorInput:
       type: object
       properties:

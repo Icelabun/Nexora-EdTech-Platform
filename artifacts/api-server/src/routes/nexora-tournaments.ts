@@ -27,6 +27,15 @@ const fallbackRanks = ["E", "C", "A"];
 const fallbackTitles = ["Foundation", "Ascension", "Apex"];
 const questionsPerRound = 5;
 
+function rankForXp(xp: number): string {
+  if (xp >= 10_000) return "S";
+  if (xp >= 6_000) return "A";
+  if (xp >= 3_000) return "B";
+  if (xp >= 1_500) return "C";
+  if (xp >= 500) return "D";
+  return "E";
+}
+
 function asId(raw: string | string[] | undefined): string {
   return Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? "");
 }
@@ -281,6 +290,7 @@ router.post("/tournaments/:tournamentId/rounds/answer", requireNexoraAuth, async
         correctCount,
         answeredCount,
         accuracy,
+        ...(tournamentComplete && !tournament.paid ? { rankBadge: "Apex Finisher" } : {}),
         ...(tournamentComplete ? { completed: true, completedAt: now } : {}),
       },
     },
@@ -302,8 +312,12 @@ router.post("/tournaments/:tournamentId/rounds/answer", requireNexoraAuth, async
     if (user) {
       const currentAccessUntil = user.arenaAccessUntil?.getTime() ?? 0;
       user.arenaAccessUntil = new Date(Math.max(Date.now(), currentAccessUntil) + 24 * 60 * 60 * 1000);
+      const tournamentXp = Math.max(50, updatedEntry.points);
+      user.xp += tournamentXp;
+      user.level = Math.floor(user.xp / 500) + 1;
+      user.hunterRank = rankForXp(user.xp);
       await user.save();
-      message += " You earned 24 hours of Arena Pass access.";
+      message += ` You earned +${tournamentXp} XP, the Apex Finisher badge, and 24 hours of Arena Pass access.`;
     }
   }
   const nextQuestion = !roundComplete
@@ -350,6 +364,7 @@ router.get("/tournaments/:tournamentId/leaderboard", requireNexoraAuth, async (r
       timeSeconds: Math.round(entry.totalTimeMs / 1000),
       accuracy: entry.accuracy,
       completed: Boolean(entry.completed),
+      rankBadge: entry.rankBadge ?? null,
     };
   });
   res.json(GetTournamentLeaderboardResponse.parse(rows));

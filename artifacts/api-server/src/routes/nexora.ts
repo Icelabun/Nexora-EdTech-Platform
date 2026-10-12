@@ -20,6 +20,7 @@ import {
   GetClassStudentsParams,
   GetClassStudentsResponse,
   GetClassesResponse,
+  GetAssignmentsResponse,
   GetCurrentUserResponse,
   GetDashboardResponse,
   GetLeaderboardsQueryParams,
@@ -669,6 +670,30 @@ router.get("/classes/:classId/students", requireNexoraAuth, requireNexoraRole("t
   }))));
 });
 
+router.get("/assignments", requireNexoraAuth, async (req, res): Promise<void> => {
+  const userId = authenticatedUserId(req);
+  const role = authRole(req);
+  const userClasses = role === "admin"
+    ? await ClassModel.find({}).select("_id name")
+    : role === "teacher"
+      ? await ClassModel.find({ teacherId: userId }).select("_id name")
+      : await ClassModel.find({ students: userId }).select("_id name");
+  const classNames = new Map((userClasses as any[]).map((room) => [String(room._id), room.name]));
+  const assignments = await AssignmentModel.find({
+    classId: { $in: userClasses.map((room: any) => room._id) },
+    ...(role === "admin" ? {} : role === "teacher" ? { teacherId: userId } : {}),
+  }).sort({ dueAt: 1 });
+  res.json(GetAssignmentsResponse.parse(assignments.map((assignment: any) => ({
+    id: String(assignment._id),
+    title: assignment.title,
+    classId: String(assignment.classId),
+    className: classNames.get(String(assignment.classId)) ?? "Class",
+    subject: assignment.subject,
+    rank: assignment.rank,
+    dueAt: assignment.dueAt.toISOString(),
+  }))));
+});
+
 router.post("/assignments", requireNexoraAuth, requireNexoraRole("teacher", "admin"), async (req, res): Promise<void> => {
   const parsed = CreateAssignmentBody.safeParse(req.body);
   if (!parsed.success) {
@@ -728,6 +753,11 @@ router.post("/subscriptions", requireNexoraAuth, async (req, res): Promise<void>
   const parsed = SelectSubscriptionBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const requesterRole = authRole(req);
+  if (parsed.data.tier === "institution" && requesterRole !== "teacher" && requesterRole !== "admin") {
+    res.status(403).json({ error: "Institution plans are available to teacher and admin accounts." });
     return;
   }
   const userId = authenticatedUserId(req);
