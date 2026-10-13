@@ -2,6 +2,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import mongoose from "mongoose";
 import { seedNexoraData } from "./lib/nexora-seed";
+import { sweepExpiredSubscriptions } from "./lib/nexora-subscriptions";
 
 const requiredSecrets = ["MONGODB_URI", "JWT_SECRET"] as const;
 for (const name of requiredSecrets) {
@@ -35,8 +36,18 @@ const start = async () => {
   const server = app.listen(port, () => {
     logger.info({ port }, "Server listening");
   });
+  const subscriptionSweep = setInterval(() => {
+    void sweepExpiredSubscriptions().catch((err: unknown) => {
+      logger.error({ err }, "Subscription expiry sweep failed");
+    });
+  }, 10 * 60 * 1000);
+  subscriptionSweep.unref();
+  void sweepExpiredSubscriptions().catch((err: unknown) => {
+    logger.error({ err }, "Initial subscription expiry sweep failed");
+  });
   const shutdown = (signal: string) => {
     logger.info({ signal }, "Shutting down API server");
+    clearInterval(subscriptionSweep);
     server.close(() => {
       void mongoose.disconnect().finally(() => process.exit(0));
     });

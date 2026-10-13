@@ -5,9 +5,11 @@
  * Nexora learning platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { DungeonStartInputMode } from './dungeonStartInputMode';
 import type { DungeonStartInputRank } from './dungeonStartInputRank';
 
 export interface DungeonStartInput {
   subject: string;
   rank: DungeonStartInputRank;
+  mode?: DungeonStartInputMode;
 }

@@ -198,15 +198,19 @@ export const GetDashboardResponse = zod.object({
 /**
  * @summary Start a server-validated dungeon run
  */
+export const startDungeonBodyModeDefault = `standard`;
+
 export const StartDungeonBody = zod.object({
   "subject": zod.string(),
-  "rank": zod.enum(['E', 'D', 'C', 'B', 'A', 'S'])
+  "rank": zod.enum(['E', 'D', 'C', 'B', 'A', 'S']),
+  "mode": zod.enum(['standard', 'quick']).default(startDungeonBodyModeDefault)
 })
 
 export const StartDungeonResponse = zod.object({
   "runId": zod.string(),
   "subject": zod.string(),
   "rank": zod.string(),
+  "mode": zod.enum(['standard', 'quick']),
   "questionId": zod.string(),
   "prompt": zod.string(),
   "options": zod.array(zod.string()),
@@ -214,7 +218,12 @@ export const StartDungeonResponse = zod.object({
   "totalQuestions": zod.number().int(),
   "isBoss": zod.boolean(),
   "playerHp": zod.number().int(),
-  "enemyHp": zod.number().int()
+  "enemyHp": zod.number().int(),
+  "expiresAt": zod.coerce.date().nullable(),
+  "timeRemainingSeconds": zod.number().int(),
+  "pauseUsed": zod.boolean(),
+  "paused": zod.boolean(),
+  "pauseExpiresAt": zod.coerce.date().nullable()
 })
 
 
@@ -245,11 +254,14 @@ export const AnswerDungeonQuestionResponse = zod.object({
   "accuracy": zod.number().int(),
   "levelUp": zod.boolean(),
   "hunterRank": zod.string(),
+  "previousHunterRank": zod.string(),
+  "rankUp": zod.boolean(),
   "branchUnlocked": zod.boolean(),
   "nextQuestion": zod.union([zod.object({
   "runId": zod.string(),
   "subject": zod.string(),
   "rank": zod.string(),
+  "mode": zod.enum(['standard', 'quick']),
   "questionId": zod.string(),
   "prompt": zod.string(),
   "options": zod.array(zod.string()),
@@ -257,20 +269,59 @@ export const AnswerDungeonQuestionResponse = zod.object({
   "totalQuestions": zod.number().int(),
   "isBoss": zod.boolean(),
   "playerHp": zod.number().int(),
-  "enemyHp": zod.number().int()
+  "enemyHp": zod.number().int(),
+  "expiresAt": zod.coerce.date().nullable(),
+  "timeRemainingSeconds": zod.number().int(),
+  "pauseUsed": zod.boolean(),
+  "paused": zod.boolean(),
+  "pauseExpiresAt": zod.coerce.date().nullable()
 }),zod.null()])
 })
 
 
 /**
- * @summary Reset a dungeon after leaving the active session
+ * @summary Reset a dungeon after the focus grace period or a manual reset
  */
 export const AbandonDungeonParams = zod.object({
   "runId": zod.coerce.string()
 })
 
+export const AbandonDungeonBody = zod.object({
+  "reason": zod.enum(['manual', 'focus-grace-expired', 'timer-expired'])
+})
+
 export const AbandonDungeonResponse = zod.object({
   "message": zod.string()
+})
+
+
+/**
+ * @summary Use the one server-limited pause for this run
+ */
+export const PauseDungeonParams = zod.object({
+  "runId": zod.coerce.string()
+})
+
+export const PauseDungeonResponse = zod.object({
+  "paused": zod.boolean(),
+  "pauseUsed": zod.boolean(),
+  "pauseExpiresAt": zod.coerce.date().nullable(),
+  "timeRemainingSeconds": zod.number().int()
+})
+
+
+/**
+ * @summary Resume a paused dungeon
+ */
+export const ResumeDungeonParams = zod.object({
+  "runId": zod.coerce.string()
+})
+
+export const ResumeDungeonResponse = zod.object({
+  "paused": zod.boolean(),
+  "pauseUsed": zod.boolean(),
+  "pauseExpiresAt": zod.coerce.date().nullable(),
+  "timeRemainingSeconds": zod.number().int()
 })
 
 
@@ -282,6 +333,211 @@ export const ChooseDungeonBranchBody = zod.object({
 })
 
 export const ChooseDungeonBranchResponse = zod.object({
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Get today's Gate Opens reward status
+ */
+export const GetDailyRewardResponse = zod.object({
+  "claimedToday": zod.boolean(),
+  "welcomeBack": zod.boolean(),
+  "claimedAt": zod.coerce.date().nullable(),
+  "xpReward": zod.number().int(),
+  "itemName": zod.string(),
+  "itemQuantity": zod.number().int()
+})
+
+
+/**
+ * @summary Claim today's non-streak daily reward
+ */
+export const ClaimDailyRewardResponse = zod.object({
+  "claimed": zod.boolean(),
+  "welcomeBack": zod.boolean(),
+  "xpAwarded": zod.number().int(),
+  "itemName": zod.string(),
+  "itemQuantity": zod.number().int(),
+  "claimedAt": zod.coerce.date().nullable(),
+  "hunterRank": zod.string(),
+  "previousHunterRank": zod.string(),
+  "rankUp": zod.boolean()
+})
+
+
+/**
+ * @summary Resume the student's persisted supernatural investigation
+ */
+export const GetEventSessionResponse = zod.object({
+  "available": zod.boolean(),
+  "message": zod.string(),
+  "session": zod.union([zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['active', 'completed', 'expired']),
+  "caseTitle": zod.string(),
+  "intro": zod.string(),
+  "startedAt": zod.coerce.date(),
+  "expiresAt": zod.coerce.date(),
+  "timeRemainingSeconds": zod.number().int(),
+  "focusRemaining": zod.number().int(),
+  "focusTotal": zod.number().int(),
+  "currentLeadIndex": zod.number().int(),
+  "leadCount": zod.number().int(),
+  "clues": zod.array(zod.object({
+  "id": zod.string(),
+  "position": zod.number().int(),
+  "title": zod.string(),
+  "scene": zod.string(),
+  "clue": zod.string(),
+  "revealed": zod.boolean(),
+  "solved": zod.boolean()
+})),
+  "currentProblem": zod.union([zod.object({
+  "stepId": zod.string(),
+  "title": zod.string(),
+  "scene": zod.string(),
+  "subject": zod.enum(['Math', 'Chemistry']),
+  "difficulty": zod.number().int(),
+  "prompt": zod.string(),
+  "options": zod.array(zod.string()),
+  "finale": zod.boolean(),
+  "hpDamage": zod.number().int()
+}),zod.null()]),
+  "monster": zod.union([zod.object({
+  "name": zod.string(),
+  "hp": zod.number().int(),
+  "maxHp": zod.number().int()
+}),zod.null()]),
+  "reward": zod.object({
+  "xp": zod.number().int(),
+  "badge": zod.string(),
+  "title": zod.string()
+}),
+  "rewardGranted": zod.boolean()
+}),zod.null()])
+})
+
+
+/**
+ * @summary Start the one-time supernatural case after choosing its door
+ */
+export const StartEventSessionResponse = zod.object({
+  "available": zod.boolean(),
+  "message": zod.string(),
+  "session": zod.union([zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['active', 'completed', 'expired']),
+  "caseTitle": zod.string(),
+  "intro": zod.string(),
+  "startedAt": zod.coerce.date(),
+  "expiresAt": zod.coerce.date(),
+  "timeRemainingSeconds": zod.number().int(),
+  "focusRemaining": zod.number().int(),
+  "focusTotal": zod.number().int(),
+  "currentLeadIndex": zod.number().int(),
+  "leadCount": zod.number().int(),
+  "clues": zod.array(zod.object({
+  "id": zod.string(),
+  "position": zod.number().int(),
+  "title": zod.string(),
+  "scene": zod.string(),
+  "clue": zod.string(),
+  "revealed": zod.boolean(),
+  "solved": zod.boolean()
+})),
+  "currentProblem": zod.union([zod.object({
+  "stepId": zod.string(),
+  "title": zod.string(),
+  "scene": zod.string(),
+  "subject": zod.enum(['Math', 'Chemistry']),
+  "difficulty": zod.number().int(),
+  "prompt": zod.string(),
+  "options": zod.array(zod.string()),
+  "finale": zod.boolean(),
+  "hpDamage": zod.number().int()
+}),zod.null()]),
+  "monster": zod.union([zod.object({
+  "name": zod.string(),
+  "hp": zod.number().int(),
+  "maxHp": zod.number().int()
+}),zod.null()]),
+  "reward": zod.object({
+  "xp": zod.number().int(),
+  "badge": zod.string(),
+  "title": zod.string()
+}),
+  "rewardGranted": zod.boolean()
+}),zod.null()])
+})
+
+
+/**
+ * @summary Submit the current case or monster problem
+ */
+
+export const answerEventProblemBodyAnswerIndexMin = 0;
+export const answerEventProblemBodyAnswerIndexMax = 3;
+
+
+
+export const AnswerEventProblemBody = zod.object({
+  "stepId": zod.string().min(1),
+  "answerIndex": zod.number().int().min(answerEventProblemBodyAnswerIndexMin).max(answerEventProblemBodyAnswerIndexMax)
+})
+
+export const AnswerEventProblemResponse = zod.object({
+  "correct": zod.boolean(),
+  "explanation": zod.string(),
+  "focusRemaining": zod.number().int(),
+  "session": zod.object({
+  "id": zod.string(),
+  "status": zod.enum(['active', 'completed', 'expired']),
+  "caseTitle": zod.string(),
+  "intro": zod.string(),
+  "startedAt": zod.coerce.date(),
+  "expiresAt": zod.coerce.date(),
+  "timeRemainingSeconds": zod.number().int(),
+  "focusRemaining": zod.number().int(),
+  "focusTotal": zod.number().int(),
+  "currentLeadIndex": zod.number().int(),
+  "leadCount": zod.number().int(),
+  "clues": zod.array(zod.object({
+  "id": zod.string(),
+  "position": zod.number().int(),
+  "title": zod.string(),
+  "scene": zod.string(),
+  "clue": zod.string(),
+  "revealed": zod.boolean(),
+  "solved": zod.boolean()
+})),
+  "currentProblem": zod.union([zod.object({
+  "stepId": zod.string(),
+  "title": zod.string(),
+  "scene": zod.string(),
+  "subject": zod.enum(['Math', 'Chemistry']),
+  "difficulty": zod.number().int(),
+  "prompt": zod.string(),
+  "options": zod.array(zod.string()),
+  "finale": zod.boolean(),
+  "hpDamage": zod.number().int()
+}),zod.null()]),
+  "monster": zod.union([zod.object({
+  "name": zod.string(),
+  "hp": zod.number().int(),
+  "maxHp": zod.number().int()
+}),zod.null()]),
+  "reward": zod.object({
+  "xp": zod.number().int(),
+  "badge": zod.string(),
+  "title": zod.string()
+}),
+  "rewardGranted": zod.boolean()
+}),
+  "rankUp": zod.boolean(),
+  "hunterRank": zod.string(),
+  "xpAwarded": zod.number().int(),
+  "rewardGranted": zod.boolean(),
   "message": zod.string()
 })
 
@@ -316,6 +572,10 @@ export const GetTournamentsResponseItem = zod.object({
   "prizePoolEtb": zod.number().int(),
   "joined": zod.boolean(),
   "completed": zod.boolean(),
+  "paymentStatus": zod.string(),
+  "checkoutUrl": zod.string().url().nullable(),
+  "capacity": zod.number().int(),
+  "isFull": zod.boolean(),
   "totalRounds": zod.number().int(),
   "roundDurationSeconds": zod.number().int(),
   "payoutBreakdown": zod.array(zod.string()),
@@ -335,7 +595,8 @@ export const JoinTournamentResponse = zod.object({
   "tournamentId": zod.string(),
   "joined": zod.boolean(),
   "paymentStatus": zod.string(),
-  "message": zod.string()
+  "message": zod.string(),
+  "checkoutUrl": zod.string().url().nullable()
 })
 
 
@@ -560,12 +821,16 @@ export const CreateAssignmentResponse = zod.object({
 export const GetSubscriptionResponse = zod.object({
   "tier": zod.enum(['free', 'arena', 'institution']),
   "priceEtb": zod.number().int(),
-  "billingStatus": zod.string()
+  "billingStatus": zod.string(),
+  "currentPeriodEnd": zod.coerce.date().nullable(),
+  "graceEndsAt": zod.coerce.date().nullable(),
+  "renewalDueAt": zod.coerce.date().nullable(),
+  "checkoutUrl": zod.string().url().nullable()
 })
 
 
 /**
- * @summary Select a subscription tier using mock billing
+ * @summary Choose Free or create a hosted Arena Pass checkout
  */
 export const SelectSubscriptionBody = zod.object({
   "tier": zod.enum(['free', 'arena', 'institution'])
@@ -574,7 +839,67 @@ export const SelectSubscriptionBody = zod.object({
 export const SelectSubscriptionResponse = zod.object({
   "tier": zod.enum(['free', 'arena', 'institution']),
   "priceEtb": zod.number().int(),
-  "billingStatus": zod.string()
+  "billingStatus": zod.string(),
+  "currentPeriodEnd": zod.coerce.date().nullable(),
+  "graceEndsAt": zod.coerce.date().nullable(),
+  "renewalDueAt": zod.coerce.date().nullable(),
+  "checkoutUrl": zod.string().url().nullable()
+})
+
+
+/**
+ * @summary List the signed-in student's payments or all payments for an admin
+ */
+export const GetPaymentHistoryResponse = zod.object({
+  "payments": zod.array(zod.object({
+  "id": zod.string(),
+  "txRef": zod.string(),
+  "purpose": zod.string(),
+  "amountEtb": zod.number(),
+  "currency": zod.string(),
+  "status": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date(),
+  "checkoutUrl": zod.string().url().nullable(),
+  "refundStatus": zod.string().nullable(),
+  "refundAmountEtb": zod.number().nullable()
+})),
+  "adminView": zod.boolean()
+})
+
+
+/**
+ * This endpoint verifies the raw-body Chapa signature and checks the transaction server-side. Browser redirects never grant access.
+ * @summary Receive signed Chapa payment and refund events
+ */
+export const ChapaWebhookResponse = zod.object({
+  "received": zod.boolean(),
+  "duplicate": zod.boolean()
+})
+
+
+/**
+ * @summary Start or retry an admin refund
+ */
+export const RefundPaymentParams = zod.object({
+  "paymentId": zod.coerce.string()
+})
+
+export const RefundPaymentResponse = zod.object({
+  "status": zod.string(),
+  "message": zod.string()
+})
+
+
+/**
+ * @summary Cancel a tournament and initiate refunds for confirmed paid entries
+ */
+export const CancelTournamentParams = zod.object({
+  "tournamentId": zod.coerce.string()
+})
+
+export const CancelTournamentResponse = zod.object({
+  "message": zod.string()
 })
 
 

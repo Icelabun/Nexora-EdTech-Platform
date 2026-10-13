@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { logger } from "./logger";
 import {
+  EventCaseModel,
   QuestionModel,
   SubjectModel,
   TournamentModel,
@@ -115,6 +116,151 @@ const sampleQuestions: Record<string, SampleQuestion[]> = {
   ],
 };
 
+const supernaturalCase = {
+  caseId: "the-last-lantern",
+  title: "The Last Lantern",
+  intro: "At 11:47 p.m., the lights in the old Addis Ababa science archive went out. A lantern is still burning in the sealed east wing. Seven traces lead there; the answers open each door.",
+  durationSeconds: 3600,
+  focusTotal: 5,
+  leads: [
+    {
+      id: "archive-lock",
+      position: 1,
+      title: "The Archive Lock",
+      scene: "A brass lock is warm to the touch. Chalk on its face reads: “Three times the code, minus five, gives sixteen.” Behind the door, a thin line of gold light cuts across the floor.",
+      clue: "A wet footprint points toward the chemistry bench.",
+      subject: "Math",
+      difficulty: 1,
+      prompt: "Solve 3x − 5 = 16.",
+      options: ["x = 7", "x = 8", "x = 9", "x = 11"],
+      correctAnswerIndex: 0,
+      explanation: "Add 5 to get 3x = 21, then divide by 3: x = 7.",
+    },
+    {
+      id: "burner-notebook",
+      position: 2,
+      title: "The Burner Notebook",
+      scene: "A notebook lies beside a cold burner. The last page is covered in a reaction with its coefficients scratched away. The margin smells faintly of smoke.",
+      clue: "The water on the bench came from a hydrogen flame.",
+      subject: "Chemistry",
+      difficulty: 2,
+      prompt: "Which coefficients balance H₂ + O₂ → H₂O?",
+      options: ["1, 1, 1", "2, 1, 2", "1, 2, 1", "2, 2, 1"],
+      correctAnswerIndex: 1,
+      explanation: "2H₂ + O₂ → 2H₂O balances four hydrogen atoms and two oxygen atoms.",
+    },
+    {
+      id: "chalk-roots",
+      position: 3,
+      title: "Roots on the Board",
+      scene: "A blackboard squeaks although nobody is near it. Two roots circle the equation x² − 7x + 12 = 0; one has been wiped away.",
+      clue: "Both roots add to seven and multiply to twelve.",
+      subject: "Math",
+      difficulty: 2,
+      prompt: "What are the roots of x² − 7x + 12 = 0?",
+      options: ["2 and 6", "3 and 4", "−3 and −4", "1 and 12"],
+      correctAnswerIndex: 1,
+      explanation: "Factor the expression as (x − 3)(x − 4) = 0, so x = 3 or x = 4.",
+    },
+    {
+      id: "silver-beaker",
+      position: 4,
+      title: "The Silver Beaker",
+      scene: "A beaker has a silver film inside. Its label reads 0.20 mol/L, but a second note says only half a litre was prepared.",
+      clue: "The mixture contains one tenth of a mole of dissolved salt.",
+      subject: "Chemistry",
+      difficulty: 2,
+      prompt: "How many moles of solute are in 0.50 L of a 0.20 mol/L solution?",
+      options: ["0.01 mol", "0.10 mol", "0.25 mol", "2.50 mol"],
+      correctAnswerIndex: 1,
+      explanation: "n = cV = 0.20 mol/L × 0.50 L = 0.10 mol.",
+    },
+    {
+      id: "stairwell-shadow",
+      position: 5,
+      title: "The Stairwell Shadow",
+      scene: "A shadow climbs the stairwell against the direction of the light. A strip of paper on the wall shows d(x³ − 2x)/dx.",
+      clue: "At x = 2, the shadow's rate of change is ten.",
+      subject: "Math",
+      difficulty: 3,
+      prompt: "Evaluate the derivative of x³ − 2x at x = 2.",
+      options: ["6", "8", "10", "12"],
+      correctAnswerIndex: 2,
+      explanation: "The derivative is 3x² − 2. At x = 2 it is 3(4) − 2 = 10.",
+    },
+    {
+      id: "equilibrium-glass",
+      position: 6,
+      title: "The Equilibrium Glass",
+      scene: "A cracked glass tube holds a violet vapour. A reaction card identifies nitrogen, hydrogen, and ammonia. The tube vibrates whenever the archive clock ticks.",
+      clue: "The unseen force is gathering where the violet vapour is most concentrated.",
+      subject: "Chemistry",
+      difficulty: 4,
+      prompt: "For N₂(g) + 3H₂(g) ⇌ 2NH₃(g), which expression gives Kc?",
+      options: ["[N₂][H₂]³ / [NH₃]²", "[NH₃]² / ([N₂][H₂]³)", "[NH₃] / ([N₂][H₂])", "[N₂] + 3[H₂] / 2[NH₃]"],
+      correctAnswerIndex: 1,
+      explanation: "Products go in the numerator and reactants in the denominator, each raised to its coefficient.",
+    },
+    {
+      id: "east-wing-map",
+      position: 7,
+      title: "The East-Wing Map",
+      scene: "The final trace is a map of the east wing. Three marks form a triangle around the lantern room. Under the map: “The door opens where the line meets the axis.”",
+      clue: "The lantern is inside the sealed room; the reaction on its door is N₂ + 3H₂ → 2NH₃.",
+      subject: "Math",
+      difficulty: 4,
+      prompt: "Find the x-intercepts of y = x² − 5x + 6.",
+      options: ["x = 1 and 6", "x = −2 and −3", "x = 2 and 3", "x = 0 and 6"],
+      correctAnswerIndex: 2,
+      explanation: "Factor as (x − 2)(x − 3) = 0; the graph crosses the x-axis at 2 and 3.",
+    },
+  ],
+  monsterName: "The Ashen Wraith",
+  monsterHp: 100,
+  finaleSteps: [
+    {
+      id: "wraith-limiting-reagent",
+      title: "Break the First Seal",
+      scene: "The Wraith rises around the lantern. A reaction burns across its chest: N₂ + 3H₂ → 2NH₃. Four moles of nitrogen and nine moles of hydrogen remain.",
+      subject: "Chemistry",
+      difficulty: 4,
+      prompt: "Which reactant is limiting?",
+      options: ["N₂", "H₂", "NH₃", "Neither; they are in exact proportion"],
+      correctAnswerIndex: 1,
+      explanation: "Four moles of N₂ need 12 moles of H₂. Only 9 moles are present, so H₂ is limiting.",
+      hpDamage: 30,
+    },
+    {
+      id: "wraith-theoretical-yield",
+      title: "Break the Second Seal",
+      scene: "The first seal cracks. The Wraith recoils as the remaining hydrogen begins to react.",
+      subject: "Chemistry",
+      difficulty: 5,
+      prompt: "How many moles of NH₃ can form from 9 mol H₂ when N₂ is in excess?",
+      options: ["3 mol", "6 mol", "9 mol", "18 mol"],
+      correctAnswerIndex: 1,
+      explanation: "The mole ratio is 3 mol H₂ : 2 mol NH₃, so 9 mol H₂ produces 6 mol NH₃.",
+      hpDamage: 30,
+    },
+    {
+      id: "wraith-percent-yield",
+      title: "Break the Final Seal",
+      scene: "The lantern flares. The Wraith's last shield weakens; the notebook says the experiment collected 4.5 mol NH₃.",
+      subject: "Math",
+      difficulty: 5,
+      prompt: "If the theoretical yield is 6 mol and the actual yield is 4.5 mol, what is the percentage yield?",
+      options: ["25%", "50%", "75%", "133.3%"],
+      correctAnswerIndex: 2,
+      explanation: "Percentage yield = (actual ÷ theoretical) × 100 = (4.5 ÷ 6) × 100 = 75%.",
+      hpDamage: 40,
+    },
+  ],
+  rewardXp: 500,
+  rewardBadge: "Lantern Keeper",
+  rewardTitle: "Warden of the Unseen",
+  active: true,
+};
+
 export async function seedNexoraData(): Promise<void> {
   const samplePasswordHash = await bcrypt.hash("NexoraDemo!2026", 10);
   for (const [email, name, role] of [
@@ -154,6 +300,11 @@ export async function seedNexoraData(): Promise<void> {
       { upsert: true },
     );
   }
+  await EventCaseModel.updateOne(
+    { caseId: supernaturalCase.caseId },
+    { $set: supernaturalCase },
+    { upsert: true },
+  );
 
   const teacher = await UserModel.findOne({ email: "teacher@nexora.demo" });
   if (teacher) {
@@ -161,7 +312,7 @@ export async function seedNexoraData(): Promise<void> {
       { name: "Friday Focus Arena" },
       {
         $setOnInsert: { name: "Friday Focus Arena", subject: "Math", paid: false, entryFeeEtb: 0 },
-        $set: { startsAt: new Date(Date.now() - 60_000), roundRanks: ["E", "C", "A"], roundDurationSeconds: 300, active: true },
+        $set: { startsAt: new Date(Date.now() - 60_000), roundRanks: ["E", "C", "A"], roundDurationSeconds: 300, capacity: 64, active: true },
       },
       { upsert: true },
     );
@@ -169,7 +320,7 @@ export async function seedNexoraData(): Promise<void> {
       { name: "Golden Gate Trials" },
       {
         $setOnInsert: { name: "Golden Gate Trials", subject: "Physics", paid: true, entryFeeEtb: 50 },
-        $set: { startsAt: new Date(Date.now() - 60_000), roundRanks: ["E", "C", "A"], roundDurationSeconds: 300, active: true },
+        $set: { startsAt: new Date(Date.now() - 60_000), roundRanks: ["E", "C", "A"], roundDurationSeconds: 300, capacity: 64, active: true },
       },
       { upsert: true },
     );

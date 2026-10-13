@@ -6,6 +6,11 @@ import { Router, type IRouter, type Request } from "express";
 import {
   AbandonDungeonParams,
   AbandonDungeonResponse,
+  AbandonDungeonBody,
+  PauseDungeonParams,
+  PauseDungeonResponse,
+  ResumeDungeonParams,
+  ResumeDungeonResponse,
   AnswerDungeonQuestionBody,
   AnswerDungeonQuestionParams,
   AnswerDungeonQuestionResponse,
@@ -26,7 +31,6 @@ import {
   GetLeaderboardsQueryParams,
   GetLeaderboardsResponse,
   GetSubjectsResponse,
-  GetSubscriptionResponse,
   JoinClassBody,
   JoinClassResponse,
   LoginBody,
@@ -36,8 +40,6 @@ import {
   RegisterResponse,
   SaveOnboardingBody,
   SaveOnboardingResponse,
-  SelectSubscriptionBody,
-  SelectSubscriptionResponse,
   StartDungeonBody,
   StartDungeonResponse,
 } from "@workspace/api-zod";
@@ -53,14 +55,12 @@ import {
   AITutorSessionModel,
   AssignmentModel,
   ClassModel,
+  DungeonAuditEventModel,
   DungeonRunModel,
-  PaymentModel,
   QuestionModel,
   SubjectModel,
-  SubscriptionModel,
   UserModel,
 } from "../lib/nexora-models";
-import { paymentProvider } from "../lib/nexora-payments";
 import { sendAssignmentNotification, sendWelcomeEmail } from "../lib/nexora-email";
 import { hasArenaAccess } from "../lib/nexora-access";
 
@@ -98,10 +98,18 @@ function userPayload(user: any) {
 }
 
 function questionPayload(run: any, question: any, index: number, enemyHp = 100) {
+  const now = Date.now();
+  const isPaused = Boolean(run.pausedAt && run.pauseExpiresAt && new Date(run.pauseExpiresAt).getTime() > now);
+  const timeRemainingSeconds = run.mode === "quick"
+    ? Math.max(0, isPaused
+      ? Number(run.pausedRemainingSeconds ?? 0)
+      : Math.ceil((new Date(run.expiresAt).getTime() - now) / 1000))
+    : 0;
   return {
     runId: String(run._id),
     subject: run.subject,
     rank: run.rank,
+    mode: run.mode ?? "standard",
     questionId: String(question._id),
     prompt: question.prompt,
     options: question.options,
@@ -110,6 +118,11 @@ function questionPayload(run: any, question: any, index: number, enemyHp = 100) 
     isBoss: index === run.questionIds.length - 1,
     playerHp: run.playerHp,
     enemyHp,
+    expiresAt: run.expiresAt?.toISOString() ?? null,
+    timeRemainingSeconds,
+    pauseUsed: Boolean(run.pauseUsed),
+    paused: isPaused,
+    pauseExpiresAt: isPaused ? run.pauseExpiresAt.toISOString() : null,
   };
 }
 
@@ -120,10 +133,6 @@ function rankForXp(xp: number): string {
   if (xp >= 1_500) return "C";
   if (xp >= 500) return "D";
   return "E";
-}
-
-function subscriptionPrice(tier: string): number {
-  return tier === "arena" ? 150 : 0;
 }
 
 function asId(raw: string | string[] | undefined): string {
@@ -288,9 +297,10 @@ router.post("/dungeons", requireNexoraAuth, requireNexoraRole("student", "teache
       return;
     }
   }
+  const mode = parsed.data.mode ?? "standard";
   const questions = await QuestionModel.aggregate([
     { $match: { subject: parsed.data.subject, rank: parsed.data.rank } },
-    { $sample: { size: dungeonSize } },
+    { $sample: { size: mode === "quick" ? 5 : dungeonSize } },
     { $project: { prompt: 1, options: 1, explanation: 1, correctAnswerIndex: 1 } },
   ]);
   if (questions.length < dungeonSize) {
@@ -301,6 +311,8 @@ router.post("/dungeons", requireNexoraAuth, requireNexoraRole("student", "teache
     userId,
     subject: parsed.data.subject,
     rank: parsed.data.rank,
+    mode,
+    ...(mode === "quick" ? { expiresAt: new Date(Date.now() + 5 * 60 * 1000) } : {}),
     questionIds: questions.map((question: any) => question._id),
   });
   const firstQuestion = await QuestionModel.findById(run.questionIds[0]);
@@ -326,6 +338,33 @@ router.post("/dungeons/:runId/answer", requireNexoraAuth, async (req, res): Prom
   }
   if (run.status !== "active" || run.currentIndex >= run.questionIds.length) {
     res.status(409).json({ error: "This dungeon run is no longer active." });
+    return;
+  }
+  const now = new Date();
+  if (run.pausedAt && run.pauseExpiresAt && new Date(run.pauseExpiresAt).getTime() > now.getTime()) {
+    res.status(409).json({ error: "This run is paused. Resume it before answering." });
+    return;
+  }
+  if (run.pausedAt && run.pauseExpiresAt && new Date(run.pauseExpiresAt).getTime() <= now.getTime()) {
+    const elapsedPauseMs = Math.min(60_000, Math.max(0, now.getTime() - new Date(run.pausedAt).getTime()));
+    const expiresAt = run.expiresAt
+      ? new Date(new Date(run.expiresAt).getTime() + elapsedPauseMs)
+      : null;
+    await DungeonRunModel.updateOne(
+      { _id: run._id, userId, status: "active", pausedAt: run.pausedAt },
+      { $set: { pausedAt: null, pauseExpiresAt: null, ...(expiresAt ? { expiresAt } : {}) } },
+    );
+    await DungeonAuditEventModel.create({ userId, runId: run._id, eventType: "resume", reason: "pause-time-limit" });
+    run.pausedAt = null;
+    run.pauseExpiresAt = null;
+    if (expiresAt) run.expiresAt = expiresAt;
+  }
+  if (run.mode === "quick" && run.expiresAt && new Date(run.expiresAt).getTime() <= now.getTime()) {
+    await DungeonRunModel.updateOne(
+      { _id: run._id, userId, status: "active" },
+      { $set: { status: "failed", completedAt: now } },
+    );
+    res.status(410).json({ error: "The five-minute Quick Dungeon timer expired." });
     return;
   }
   const expectedQuestionId = String(run.questionIds[run.currentIndex]);
@@ -361,7 +400,11 @@ router.post("/dungeons/:runId/answer", requireNexoraAuth, async (req, res): Prom
         answeredCount,
         xpEarned,
         accuracy,
-        ...(completed ? { status: succeeded ? "success" : "failed", completedAt: new Date() } : {}),
+        ...(completed ? {
+          status: succeeded ? "success" : "failed",
+          completedAt: new Date(),
+          ...(succeeded ? { bossDefeated: true } : {}),
+        } : {}),
       },
       ...(!correct
         ? {
@@ -389,12 +432,14 @@ router.post("/dungeons/:runId/answer", requireNexoraAuth, async (req, res): Prom
     return;
   }
   const oldLevel = user.level;
+  const previousHunterRank = user.hunterRank ?? "E";
   user.xp += awardedXp;
   user.level = Math.floor(user.xp / 500) + 1;
   const levelUp = user.level > oldLevel;
   let branchUnlocked = false;
   let hunterRank = rankForXp(user.xp);
   user.hunterRank = hunterRank;
+  const rankUp = hunterRank !== previousHunterRank;
   const now = new Date();
   const currentDay = new Date(now);
   currentDay.setHours(0, 0, 0, 0);
@@ -412,7 +457,7 @@ router.post("/dungeons/:runId/answer", requireNexoraAuth, async (req, res): Prom
     const mastery = subjectMap(user);
     mastery[run.subject] = Math.min(100, Math.round(Number(mastery[run.subject] ?? 0) + accuracy * 0.1));
     user.subjectMastery = mastery as any;
-    if (accuracy >= 95 && !user.branchUnlocked && !user.branchChoice) {
+    if (updatedRun.bossDefeated && accuracy >= 95 && !user.branchUnlocked && !user.branchChoice) {
       user.branchUnlocked = true;
       branchUnlocked = true;
     }
@@ -433,6 +478,8 @@ router.post("/dungeons/:runId/answer", requireNexoraAuth, async (req, res): Prom
     accuracy,
     levelUp,
     hunterRank,
+    previousHunterRank,
+    rankUp,
     branchUnlocked,
     nextQuestion: nextQuestion ? questionPayload(updatedRun, nextQuestion, currentIndex) : null,
   };
@@ -445,15 +492,134 @@ router.post("/dungeons/:runId/abandon", requireNexoraAuth, async (req, res): Pro
     res.status(400).json({ error: params.error.message });
     return;
   }
+  const parsedReason = AbandonDungeonBody.safeParse(req.body ?? {});
+  const reason = parsedReason.success ? parsedReason.data.reason : "manual";
+  const userId = authenticatedUserId(req);
   const run = await DungeonRunModel.findOneAndUpdate(
-    { _id: params.data.runId, userId: authenticatedUserId(req), status: "active" },
+    { _id: params.data.runId, userId, status: "active" },
     { $set: { status: "abandoned", completedAt: new Date() } },
   );
   if (!run) {
     res.status(404).json({ error: "Active dungeon run not found." });
     return;
   }
+  await DungeonAuditEventModel.create({ userId, runId: run._id, eventType: "reset", reason });
   res.json(AbandonDungeonResponse.parse({ message: "Dungeon reset. Leaving the active session ends this run." }));
+});
+
+router.post("/dungeons/:runId/pause", requireNexoraAuth, async (req, res): Promise<void> => {
+  const params = PauseDungeonParams.safeParse({ runId: asId(req.params.runId) });
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const userId = authenticatedUserId(req);
+  const run = await DungeonRunModel.findOne({ _id: params.data.runId, userId });
+  if (!run || run.status !== "active") {
+    res.status(404).json({ error: "Active dungeon run not found." });
+    return;
+  }
+  const now = new Date();
+  if (run.pausedAt && run.pauseExpiresAt && new Date(run.pauseExpiresAt).getTime() > now.getTime()) {
+    res.json(PauseDungeonResponse.parse({
+      paused: true,
+      pauseUsed: true,
+      pauseExpiresAt: run.pauseExpiresAt.toISOString(),
+      timeRemainingSeconds: run.mode === "quick" ? Number(run.pausedRemainingSeconds) : 0,
+    }));
+    return;
+  }
+  if (run.pauseUsed) {
+    res.status(409).json({ error: "This run's one free pause has already been used." });
+    return;
+  }
+  if (run.mode === "quick" && run.expiresAt && run.expiresAt.getTime() <= now.getTime()) {
+    res.status(410).json({ error: "The five-minute Quick Dungeon timer expired." });
+    return;
+  }
+  const remainingSeconds = run.mode === "quick" && run.expiresAt
+    ? Math.max(0, Math.ceil((run.expiresAt.getTime() - now.getTime()) / 1000))
+    : 0;
+  const pauseExpiresAt = new Date(now.getTime() + 60_000);
+  const updated = await DungeonRunModel.findOneAndUpdate(
+    { _id: run._id, userId, status: "active", pauseUsed: false, pausedAt: null },
+    {
+      $set: {
+        pauseUsed: true,
+        pausedAt: now,
+        pauseExpiresAt,
+        pausedRemainingSeconds: remainingSeconds,
+      },
+    },
+    { new: true },
+  );
+  if (!updated) {
+    res.status(409).json({ error: "The pause could not be started. Refresh the run state and try again." });
+    return;
+  }
+  await DungeonAuditEventModel.create({ userId, runId: run._id, eventType: "pause", reason: "one-time-pause" });
+  res.json(PauseDungeonResponse.parse({
+    paused: true,
+    pauseUsed: true,
+    pauseExpiresAt: pauseExpiresAt.toISOString(),
+    timeRemainingSeconds: remainingSeconds,
+  }));
+});
+
+router.post("/dungeons/:runId/resume", requireNexoraAuth, async (req, res): Promise<void> => {
+  const params = ResumeDungeonParams.safeParse({ runId: asId(req.params.runId) });
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const userId = authenticatedUserId(req);
+  const run = await DungeonRunModel.findOne({ _id: params.data.runId, userId, status: "active" });
+  if (!run) {
+    res.status(404).json({ error: "Active dungeon run not found." });
+    return;
+  }
+  if (!run.pausedAt || !run.pauseExpiresAt) {
+    res.status(409).json({ error: "This run is not paused." });
+    return;
+  }
+  const now = new Date();
+  const pauseMs = Math.min(60_000, Math.max(0, now.getTime() - run.pausedAt.getTime()));
+  const expiresAt = run.expiresAt
+    ? new Date(run.expiresAt.getTime() + pauseMs)
+    : null;
+  const updated = await DungeonRunModel.findOneAndUpdate(
+    { _id: run._id, userId, status: "active", pausedAt: run.pausedAt },
+    {
+      $set: {
+        pausedAt: null,
+        pauseExpiresAt: null,
+        ...(expiresAt ? { expiresAt } : {}),
+      },
+    },
+    { new: true },
+  );
+  if (!updated) {
+    res.status(409).json({ error: "This run was already resumed." });
+    return;
+  }
+  await DungeonAuditEventModel.create({
+    userId,
+    runId: run._id,
+    eventType: "resume",
+    reason: now.getTime() >= run.pauseExpiresAt.getTime() ? "pause-time-limit" : "student-resume",
+  });
+  const expired = updated.mode === "quick" && updated.expiresAt && updated.expiresAt.getTime() <= now.getTime();
+  if (expired) {
+    await DungeonRunModel.updateOne({ _id: updated._id, status: "active" }, { $set: { status: "failed", completedAt: now } });
+  }
+  res.json(ResumeDungeonResponse.parse({
+    paused: false,
+    pauseUsed: true,
+    pauseExpiresAt: null,
+    timeRemainingSeconds: expired || !updated.expiresAt
+      ? 0
+      : Math.max(0, Math.ceil((updated.expiresAt.getTime() - now.getTime()) / 1000)),
+  }));
 });
 
 router.post("/dungeons/branch-choice", requireNexoraAuth, async (req, res): Promise<void> => {
@@ -732,57 +898,6 @@ router.post("/assignments", requireNexoraAuth, requireNexoraRole("teacher", "adm
     rank: assignment.rank,
     dueAt: assignment.dueAt.toISOString(),
   }));
-});
-
-router.get("/subscriptions", requireNexoraAuth, async (req, res): Promise<void> => {
-  const user = await UserModel.findById(authenticatedUserId(req));
-  if (!user) {
-    res.status(404).json({ error: "Account not found." });
-    return;
-  }
-  const subscription = await SubscriptionModel.findOne({ userId: user._id });
-  const tier = subscription?.tier ?? user.subscriptionTier ?? "free";
-  res.json(GetSubscriptionResponse.parse({
-    tier,
-    priceEtb: subscription?.priceEtb ?? subscriptionPrice(tier),
-    billingStatus: subscription?.billingStatus ?? "free",
-  }));
-});
-
-router.post("/subscriptions", requireNexoraAuth, async (req, res): Promise<void> => {
-  const parsed = SelectSubscriptionBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
-  const requesterRole = authRole(req);
-  if (parsed.data.tier === "institution" && requesterRole !== "teacher" && requesterRole !== "admin") {
-    res.status(403).json({ error: "Institution plans are available to teacher and admin accounts." });
-    return;
-  }
-  const userId = authenticatedUserId(req);
-  const amountEtb = subscriptionPrice(parsed.data.tier);
-  let billingStatus = parsed.data.tier === "free" ? "free" : "mock-active";
-  if (amountEtb > 0) {
-    const payment = await paymentProvider.collect({ userId, amountEtb, purpose: "arena-monthly-subscription" });
-    billingStatus = payment.status;
-    await PaymentModel.create({
-      userId,
-      purpose: "arena-monthly-subscription",
-      amountEtb,
-      provider: "mock",
-      status: payment.status,
-    });
-  } else if (parsed.data.tier === "institution") {
-    billingStatus = "contact-school";
-  }
-  await UserModel.findByIdAndUpdate(userId, { $set: { subscriptionTier: parsed.data.tier } });
-  await SubscriptionModel.findOneAndUpdate(
-    { userId },
-    { $set: { userId, tier: parsed.data.tier, priceEtb: amountEtb, billingStatus } },
-    { upsert: true, new: true },
-  );
-  res.json(SelectSubscriptionResponse.parse({ tier: parsed.data.tier, priceEtb: amountEtb, billingStatus }));
 });
 
 export default router;

@@ -13,14 +13,13 @@ import {
 } from "@workspace/api-zod";
 import { authenticatedUserId, requireNexoraAuth } from "../middlewares/nexora-auth";
 import {
-  PaymentModel,
   QuestionModel,
   TournamentEntryModel,
   TournamentModel,
   UserModel,
 } from "../lib/nexora-models";
 import { hasArenaAccess } from "../lib/nexora-access";
-import { paymentProvider } from "../lib/nexora-payments";
+import { createHostedPayment } from "../lib/nexora-billing";
 
 const router: IRouter = Router();
 const fallbackRanks = ["E", "C", "A"];
@@ -77,11 +76,14 @@ router.get("/tournaments", requireNexoraAuth, async (req, res): Promise<void> =>
   const result = await Promise.all(tournaments.map(async (tournament: any) => {
     const participantFilter = {
       tournamentId: tournament._id,
-      paymentStatus: tournament.paid ? "mock-approved" : "free",
+      paymentStatus: tournament.paid
+        ? { $in: ["paid", "mock-approved"] }
+        : "free",
     };
     const participants = await TournamentEntryModel.countDocuments(participantFilter);
     const pool = tournament.paid ? participants * tournament.entryFeeEtb : 0;
     const entry = await TournamentEntryModel.findOne({ tournamentId: tournament._id, userId });
+    const paymentStatus = entry?.paymentStatus ?? (tournament.paid ? "unpaid" : "free");
     const payouts = !tournament.paid
       ? ["XP, rank badges, and 24 hours of Arena Pass access for finishing"]
       : participants <= 25
@@ -97,8 +99,12 @@ router.get("/tournaments", requireNexoraAuth, async (req, res): Promise<void> =>
       prizePoolEtb: pool,
       payoutBreakdown: payouts,
       startsAt: new Date(tournament.startsAt).toISOString(),
-      joined: Boolean(entry),
+      joined: ["free", "paid", "mock-approved"].includes(paymentStatus),
       completed: Boolean(entry?.completed),
+      paymentStatus,
+      checkoutUrl: paymentStatus === "pending" ? entry?.checkoutUrl ?? null : null,
+      capacity: Number(tournament.capacity ?? 64),
+      isFull: participants >= Number(tournament.capacity ?? 64),
       totalRounds: roundRanks(tournament).length,
       roundDurationSeconds: tournament.roundDurationSeconds ?? 300,
     };
@@ -123,35 +129,106 @@ router.post("/tournaments/:tournamentId/join", requireNexoraAuth, async (req, re
     res.status(403).json({ error: "Arena Pass is required to enter paid tournaments." });
     return;
   }
-  if (await TournamentEntryModel.exists({ tournamentId: tournament._id, userId })) {
+  let entry = await TournamentEntryModel.findOne({ tournamentId: tournament._id, userId });
+  if (entry && ["free", "paid", "mock-approved"].includes(entry.paymentStatus)) {
     res.status(409).json({ error: "You're already entered in this tournament." });
     return;
   }
-  let paymentStatus = "free";
-  let message = "You're in. Good luck in the arena.";
-  if (tournament.paid) {
-    const payment = await paymentProvider.collect({
-      userId,
-      amountEtb: tournament.entryFeeEtb,
-      purpose: `tournament-${String(tournament._id)}`,
-    });
-    paymentStatus = payment.status;
-    message = "Mock payment recorded for this demo; no real funds were collected.";
-    await PaymentModel.create({
-      userId,
-      purpose: `tournament-${String(tournament._id)}`,
-      amountEtb: tournament.entryFeeEtb,
-      provider: "mock",
-      status: payment.status,
-    });
+  if (entry?.paymentStatus === "pending" && entry.checkoutUrl) {
+    res.json(JoinTournamentResponse.parse({
+      tournamentId: String(tournament._id),
+      joined: false,
+      paymentStatus: "pending",
+      message: "Finish the Chapa checkout. Your entry confirms after the signed payment webhook.",
+      checkoutUrl: entry.checkoutUrl,
+    }));
+    return;
   }
-  await TournamentEntryModel.create({ tournamentId: tournament._id, userId, paymentStatus });
-  res.json(JoinTournamentResponse.parse({
-    tournamentId: String(tournament._id),
-    joined: true,
-    paymentStatus,
-    message,
-  }));
+  const confirmedStatuses = tournament.paid ? ["paid", "mock-approved"] : ["free"];
+  const participants = await TournamentEntryModel.countDocuments({
+    tournamentId: tournament._id,
+    paymentStatus: { $in: confirmedStatuses },
+  });
+  await TournamentModel.updateOne(
+    { _id: tournament._id },
+    { $max: { participantCount: participants } },
+  );
+  const capacity = Number(tournament.capacity ?? 64);
+  if (participants >= capacity) {
+    res.status(409).json({ error: "This tournament is full. No payment was started." });
+    return;
+  }
+
+  if (!tournament.paid) {
+    const reserved = await TournamentModel.findOneAndUpdate(
+      { _id: tournament._id, active: true, $expr: { $lt: ["$participantCount", "$capacity"] } },
+      { $inc: { participantCount: 1 } },
+      { new: true },
+    );
+    if (!reserved) {
+      res.status(409).json({ error: "This tournament just filled. Try another event." });
+      return;
+    }
+    try {
+      if (entry) {
+        entry.paymentStatus = "free";
+        await entry.save();
+      } else {
+        entry = await TournamentEntryModel.create({ tournamentId: tournament._id, userId, paymentStatus: "free" });
+      }
+    } catch (error) {
+      await TournamentModel.updateOne({ _id: tournament._id }, { $inc: { participantCount: -1 } });
+      if ((error as { code?: number }).code === 11000) {
+        res.status(409).json({ error: "You're already entered in this tournament." });
+        return;
+      }
+      throw error;
+    }
+    res.json(JoinTournamentResponse.parse({
+      tournamentId: String(tournament._id),
+      joined: true,
+      paymentStatus: "free",
+      message: "You're in. Good luck in the arena.",
+      checkoutUrl: null,
+    }));
+    return;
+  }
+
+  if (!entry) {
+    entry = await TournamentEntryModel.create({
+      tournamentId: tournament._id,
+      userId,
+      paymentStatus: "pending",
+    });
+  } else {
+    entry.paymentStatus = "pending";
+    entry.checkoutUrl = null;
+    await entry.save();
+  }
+  try {
+    const payment = await createHostedPayment({
+      user,
+      purpose: `tournament-${String(tournament._id)}`,
+      amountEtb: Number(tournament.entryFeeEtb ?? 50),
+      returnPath: "/tournaments",
+      relatedTournamentId: tournament._id,
+      relatedEntryId: entry._id,
+    });
+    res.json(JoinTournamentResponse.parse({
+      tournamentId: String(tournament._id),
+      joined: false,
+      paymentStatus: "pending",
+      message: "Finish the Chapa checkout. Your entry confirms only after payment is verified.",
+      checkoutUrl: payment.checkoutUrl,
+    }));
+  } catch (error) {
+    entry.paymentStatus = "failed";
+    entry.checkoutUrl = null;
+    await entry.save();
+    const errorStatus = Number((error as { httpStatus?: number }).httpStatus) || 503;
+    const message = error instanceof Error ? error.message : "The payment service is unavailable.";
+    res.status(errorStatus).json({ error: message });
+  }
 });
 
 router.post("/tournaments/:tournamentId/rounds/start", requireNexoraAuth, async (req, res): Promise<void> => {
@@ -173,6 +250,10 @@ router.post("/tournaments/:tournamentId/rounds/start", requireNexoraAuth, async 
   const entry = await TournamentEntryModel.findOne({ tournamentId: tournament._id, userId });
   if (!entry) {
     res.status(403).json({ error: "Join this tournament before starting a round." });
+    return;
+  }
+  if (!["free", "paid", "mock-approved"].includes(entry.paymentStatus)) {
+    res.status(402).json({ error: "Tournament entry is not confirmed. Complete payment and wait for the verified webhook." });
     return;
   }
   if (entry.completed) {
@@ -241,6 +322,10 @@ router.post("/tournaments/:tournamentId/rounds/answer", requireNexoraAuth, async
   const entry = await TournamentEntryModel.findOne({ tournamentId: tournament._id, userId });
   if (!entry || entry.completed || !entry.questionIds.length || !entry.roundStartedAt || !entry.questionStartedAt) {
     res.status(409).json({ error: "Start or resume your tournament round first." });
+    return;
+  }
+  if (!["free", "paid", "mock-approved"].includes(entry.paymentStatus)) {
+    res.status(402).json({ error: "Tournament entry is not confirmed." });
     return;
   }
   const now = new Date();

@@ -5,11 +5,13 @@
  * Nexora learning platform API
  * OpenAPI spec version: 0.1.0
  */
+import type { DungeonQuestionMode } from './dungeonQuestionMode';
 
 export interface DungeonQuestion {
   runId: string;
   subject: string;
   rank: string;
+  mode: DungeonQuestionMode;
   questionId: string;
   prompt: string;
   options: string[];
@@ -18,4 +20,11 @@ export interface DungeonQuestion {
   isBoss: boolean;
   playerHp: number;
   enemyHp: number;
+  /** @nullable */
+  expiresAt: Date | null;
+  timeRemainingSeconds: number;
+  pauseUsed: boolean;
+  paused: boolean;
+  /** @nullable */
+  pauseExpiresAt: Date | null;
 }

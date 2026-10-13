@@ -11,4 +11,12 @@ export interface Subscription {
   tier: SubscriptionTier;
   priceEtb: number;
   billingStatus: string;
+  /** @nullable */
+  currentPeriodEnd: Date | null;
+  /** @nullable */
+  graceEndsAt: Date | null;
+  /** @nullable */
+  renewalDueAt: Date | null;
+  /** @nullable */
+  checkoutUrl: string | null;
 }

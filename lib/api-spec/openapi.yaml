@@ -184,13 +184,19 @@ paths:
     post:
       operationId: abandonDungeon
       tags: [learning]
-      summary: Reset a dungeon after leaving the active session
+      summary: Reset a dungeon after the focus grace period or a manual reset
       parameters:
         - in: path
           name: runId
           required: true
           schema:
             type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DungeonResetInput"
       responses:
         "200":
           description: Run abandoned
@@ -198,6 +204,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Message"
+  /dungeons/{runId}/pause:
+    post:
+      operationId: pauseDungeon
+      tags: [learning]
+      summary: Use the one server-limited pause for this run
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Dungeon pause started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DungeonPauseState"
+  /dungeons/{runId}/resume:
+    post:
+      operationId: resumeDungeon
+      tags: [learning]
+      summary: Resume a paused dungeon
+      parameters:
+        - in: path
+          name: runId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Dungeon resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DungeonPauseState"
   /dungeons/branch-choice:
     post:
       operationId: chooseDungeonBranch
@@ -216,6 +256,72 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Message"
+  /daily-reward:
+    get:
+      operationId: getDailyReward
+      tags: [learning]
+      summary: Get today's Gate Opens reward status
+      responses:
+        "200":
+          description: Daily reward status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyRewardStatus"
+  /daily-reward/claim:
+    post:
+      operationId: claimDailyReward
+      tags: [learning]
+      summary: Claim today's non-streak daily reward
+      responses:
+        "200":
+          description: Reward claimed or already claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyRewardClaim"
+  /event/session:
+    get:
+      operationId: getEventSession
+      tags: [learning]
+      summary: Resume the student's persisted supernatural investigation
+      responses:
+        "200":
+          description: Current event session and revealed case-board state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventSessionResponse"
+  /event/session/start:
+    post:
+      operationId: startEventSession
+      tags: [learning]
+      summary: Start the one-time supernatural case after choosing its door
+      responses:
+        "201":
+          description: Investigation started or resumed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventSessionResponse"
+  /event/session/answer:
+    post:
+      operationId: answerEventProblem
+      tags: [learning]
+      summary: Submit the current case or monster problem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventAnswerInput"
+      responses:
+        "200":
+          description: Answer evaluated and persisted case state returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EventAnswerResult"
   /leaderboards:
     get:
       operationId: getLeaderboards
@@ -460,7 +566,7 @@ paths:
     post:
       operationId: selectSubscription
       tags: [billing]
-      summary: Select a subscription tier using mock billing
+      summary: Choose Free or create a hosted Arena Pass checkout
       requestBody:
         required: true
         content:
@@ -474,6 +580,69 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Subscription"
+  /payments:
+    get:
+      operationId: getPaymentHistory
+      tags: [billing]
+      summary: List the signed-in student's payments or all payments for an admin
+      responses:
+        "200":
+          description: Payment history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentHistory"
+  /payments/chapa/webhook:
+    post:
+      operationId: chapaWebhook
+      tags: [billing]
+      summary: Receive signed Chapa payment and refund events
+      description: This endpoint verifies the raw-body Chapa signature and checks the transaction server-side. Browser redirects never grant access.
+      responses:
+        "200":
+          description: Webhook accepted or safely ignored as a duplicate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookAcknowledgement"
+        "400":
+          description: Invalid signature or malformed event
+        "503":
+          description: Chapa is not configured or could not be verified
+  /payments/{paymentId}/refund:
+    post:
+      operationId: refundPayment
+      tags: [billing]
+      summary: Start or retry an admin refund
+      parameters:
+        - in: path
+          name: paymentId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Refund status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefundResult"
+  /admin/tournaments/{tournamentId}/cancel:
+    post:
+      operationId: cancelTournament
+      tags: [billing]
+      summary: Cancel a tournament and initiate refunds for confirmed paid entries
+      parameters:
+        - in: path
+          name: tournamentId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Tournament cancelled and refund processing started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
 components:
   schemas:
     HealthStatus:
@@ -582,13 +751,28 @@ components:
       properties:
         subject: { type: string }
         rank: { type: string, enum: [E, D, C, B, A, S] }
+        mode: { type: string, enum: [standard, quick], default: standard }
       required: [subject, rank]
+    DungeonResetInput:
+      type: object
+      properties:
+        reason: { type: string, enum: [manual, focus-grace-expired, timer-expired] }
+      required: [reason]
+    DungeonPauseState:
+      type: object
+      properties:
+        paused: { type: boolean }
+        pauseUsed: { type: boolean }
+        pauseExpiresAt: { type: ["string", "null"], format: date-time }
+        timeRemainingSeconds: { type: integer }
+      required: [paused, pauseUsed, pauseExpiresAt, timeRemainingSeconds]
     DungeonQuestion:
       type: object
       properties:
         runId: { type: string }
         subject: { type: string }
         rank: { type: string }
+        mode: { type: string, enum: [standard, quick] }
         questionId: { type: string }
         prompt: { type: string }
         options:
@@ -599,7 +783,12 @@ components:
         isBoss: { type: boolean }
         playerHp: { type: integer }
         enemyHp: { type: integer }
-      required: [runId, subject, rank, questionId, prompt, options, questionNumber, totalQuestions, isBoss, playerHp, enemyHp]
+        expiresAt: { type: ["string", "null"], format: date-time }
+        timeRemainingSeconds: { type: integer }
+        pauseUsed: { type: boolean }
+        paused: { type: boolean }
+        pauseExpiresAt: { type: ["string", "null"], format: date-time }
+      required: [runId, subject, rank, mode, questionId, prompt, options, questionNumber, totalQuestions, isBoss, playerHp, enemyHp, expiresAt, timeRemainingSeconds, pauseUsed, paused, pauseExpiresAt]
     DungeonAnswerInput:
       type: object
       properties:
@@ -623,12 +812,121 @@ components:
         accuracy: { type: integer }
         levelUp: { type: boolean }
         hunterRank: { type: string }
+        previousHunterRank: { type: string }
+        rankUp: { type: boolean }
         branchUnlocked: { type: boolean }
         nextQuestion:
           anyOf:
             - $ref: "#/components/schemas/DungeonQuestion"
             - type: "null"
-      required: [correct, explanation, playerHp, enemyHp, xpEarned, completed, accuracy, levelUp, hunterRank, branchUnlocked, nextQuestion]
+      required: [correct, explanation, playerHp, enemyHp, xpEarned, completed, accuracy, levelUp, hunterRank, previousHunterRank, rankUp, branchUnlocked, nextQuestion]
+    DailyRewardStatus:
+      type: object
+      properties:
+        claimedToday: { type: boolean }
+        welcomeBack: { type: boolean }
+        claimedAt: { type: ["string", "null"], format: date-time }
+        xpReward: { type: integer }
+        itemName: { type: string }
+        itemQuantity: { type: integer }
+      required: [claimedToday, welcomeBack, claimedAt, xpReward, itemName, itemQuantity]
+    DailyRewardClaim:
+      type: object
+      properties:
+        claimed: { type: boolean }
+        welcomeBack: { type: boolean }
+        xpAwarded: { type: integer }
+        itemName: { type: string }
+        itemQuantity: { type: integer }
+        claimedAt: { type: ["string", "null"], format: date-time }
+        hunterRank: { type: string }
+        previousHunterRank: { type: string }
+        rankUp: { type: boolean }
+      required: [claimed, welcomeBack, xpAwarded, itemName, itemQuantity, claimedAt, hunterRank, previousHunterRank, rankUp]
+    EventAnswerInput:
+      type: object
+      properties:
+        stepId: { type: string, minLength: 1 }
+        answerIndex: { type: integer, minimum: 0, maximum: 3 }
+      required: [stepId, answerIndex]
+    EventClue:
+      type: object
+      properties:
+        id: { type: string }
+        position: { type: integer }
+        title: { type: string }
+        scene: { type: string }
+        clue: { type: string }
+        revealed: { type: boolean }
+        solved: { type: boolean }
+      required: [id, position, title, scene, clue, revealed, solved]
+    EventProblem:
+      type: object
+      properties:
+        stepId: { type: string }
+        title: { type: string }
+        scene: { type: string }
+        subject: { type: string, enum: [Math, Chemistry] }
+        difficulty: { type: integer }
+        prompt: { type: string }
+        options: { type: array, items: { type: string } }
+        finale: { type: boolean }
+        hpDamage: { type: integer }
+      required: [stepId, title, scene, subject, difficulty, prompt, options, finale, hpDamage]
+    EventReward:
+      type: object
+      properties:
+        xp: { type: integer }
+        badge: { type: string }
+        title: { type: string }
+      required: [xp, badge, title]
+    EventMonster:
+      type: object
+      properties:
+        name: { type: string }
+        hp: { type: integer }
+        maxHp: { type: integer }
+      required: [name, hp, maxHp]
+    EventSession:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [active, completed, expired] }
+        caseTitle: { type: string }
+        intro: { type: string }
+        startedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        timeRemainingSeconds: { type: integer }
+        focusRemaining: { type: integer }
+        focusTotal: { type: integer }
+        currentLeadIndex: { type: integer }
+        leadCount: { type: integer }
+        clues: { type: array, items: { $ref: "#/components/schemas/EventClue" } }
+        currentProblem: { anyOf: [{ $ref: "#/components/schemas/EventProblem" }, { type: "null" }] }
+        monster: { anyOf: [{ $ref: "#/components/schemas/EventMonster" }, { type: "null" }] }
+        reward: { $ref: "#/components/schemas/EventReward" }
+        rewardGranted: { type: boolean }
+      required: [id, status, caseTitle, intro, startedAt, expiresAt, timeRemainingSeconds, focusRemaining, focusTotal, currentLeadIndex, leadCount, clues, currentProblem, monster, reward, rewardGranted]
+    EventSessionResponse:
+      type: object
+      properties:
+        available: { type: boolean }
+        message: { type: string }
+        session: { anyOf: [{ $ref: "#/components/schemas/EventSession" }, { type: "null" }] }
+      required: [available, message, session]
+    EventAnswerResult:
+      type: object
+      properties:
+        correct: { type: boolean }
+        explanation: { type: string }
+        focusRemaining: { type: integer }
+        session: { $ref: "#/components/schemas/EventSession" }
+        rankUp: { type: boolean }
+        hunterRank: { type: string }
+        xpAwarded: { type: integer }
+        rewardGranted: { type: boolean }
+        message: { type: string }
+      required: [correct, explanation, focusRemaining, session, rankUp, hunterRank, xpAwarded, rewardGranted, message]
     LeaderboardEntry:
       type: object
       properties:
@@ -650,13 +948,17 @@ components:
         prizePoolEtb: { type: integer }
         joined: { type: boolean }
         completed: { type: boolean }
+        paymentStatus: { type: string }
+        checkoutUrl: { type: ["string", "null"], format: uri }
+        capacity: { type: integer }
+        isFull: { type: boolean }
         totalRounds: { type: integer }
         roundDurationSeconds: { type: integer }
         payoutBreakdown:
           type: array
           items: { type: string }
         startsAt: { type: string }
-      required: [id, name, subject, paid, entryFeeEtb, participants, prizePoolEtb, payoutBreakdown, startsAt, joined, completed, totalRounds, roundDurationSeconds]
+      required: [id, name, subject, paid, entryFeeEtb, participants, prizePoolEtb, payoutBreakdown, startsAt, joined, completed, paymentStatus, checkoutUrl, capacity, isFull, totalRounds, roundDurationSeconds]
     TournamentEntry:
       type: object
       properties:
@@ -664,7 +966,8 @@ components:
         joined: { type: boolean }
         paymentStatus: { type: string }
         message: { type: string }
-      required: [tournamentId, joined, paymentStatus, message]
+        checkoutUrl: { type: ["string", "null"], format: uri }
+      required: [tournamentId, joined, paymentStatus, message, checkoutUrl]
     TournamentRoundQuestion:
       type: object
       properties:
@@ -796,10 +1099,47 @@ components:
         tier: { type: string, enum: [free, arena, institution] }
         priceEtb: { type: integer }
         billingStatus: { type: string }
-      required: [tier, priceEtb, billingStatus]
+        currentPeriodEnd: { type: ["string", "null"], format: date-time }
+        graceEndsAt: { type: ["string", "null"], format: date-time }
+        renewalDueAt: { type: ["string", "null"], format: date-time }
+        checkoutUrl: { type: ["string", "null"], format: uri }
+      required: [tier, priceEtb, billingStatus, currentPeriodEnd, graceEndsAt, renewalDueAt, checkoutUrl]
     SubscriptionInput:
       type: object
       properties:
         tier: { type: string, enum: [free, arena, institution] }
       required: [tier]
+    PaymentRecord:
+      type: object
+      properties:
+        id: { type: string }
+        txRef: { type: string }
+        purpose: { type: string }
+        amountEtb: { type: number }
+        currency: { type: string }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        checkoutUrl: { type: ["string", "null"], format: uri }
+        refundStatus: { type: ["string", "null"] }
+        refundAmountEtb: { type: ["number", "null"] }
+      required: [id, txRef, purpose, amountEtb, currency, status, createdAt, updatedAt, checkoutUrl, refundStatus, refundAmountEtb]
+    PaymentHistory:
+      type: object
+      properties:
+        payments: { type: array, items: { $ref: "#/components/schemas/PaymentRecord" } }
+        adminView: { type: boolean }
+      required: [payments, adminView]
+    WebhookAcknowledgement:
+      type: object
+      properties:
+        received: { type: boolean }
+        duplicate: { type: boolean }
+      required: [received, duplicate]
+    RefundResult:
+      type: object
+      properties:
+        status: { type: string }
+        message: { type: string }
+      required: [status, message]
 

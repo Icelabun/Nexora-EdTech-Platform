@@ -17,6 +17,8 @@ export interface DungeonAnswerResult {
   accuracy: number;
   levelUp: boolean;
   hunterRank: string;
+  previousHunterRank: string;
+  rankUp: boolean;
   branchUnlocked: boolean;
   nextQuestion: DungeonQuestion | null;
 }

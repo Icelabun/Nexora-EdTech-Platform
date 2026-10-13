@@ -11,4 +11,6 @@ export interface TournamentEntry {
   joined: boolean;
   paymentStatus: string;
   message: string;
+  /** @nullable */
+  checkoutUrl: string | null;
 }

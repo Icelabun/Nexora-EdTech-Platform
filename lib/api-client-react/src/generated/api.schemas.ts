@@ -122,15 +122,54 @@ export const DungeonStartInputRank = {
   S: 'S',
 } as const;
 
+export type DungeonStartInputMode = typeof DungeonStartInputMode[keyof typeof DungeonStartInputMode];
+
+
+export const DungeonStartInputMode = {
+  standard: 'standard',
+  quick: 'quick',
+} as const;
+
 export interface DungeonStartInput {
   subject: string;
   rank: DungeonStartInputRank;
+  mode?: DungeonStartInputMode;
 }
+
+export type DungeonResetInputReason = typeof DungeonResetInputReason[keyof typeof DungeonResetInputReason];
+
+
+export const DungeonResetInputReason = {
+  manual: 'manual',
+  'focus-grace-expired': 'focus-grace-expired',
+  'timer-expired': 'timer-expired',
+} as const;
+
+export interface DungeonResetInput {
+  reason: DungeonResetInputReason;
+}
+
+export interface DungeonPauseState {
+  paused: boolean;
+  pauseUsed: boolean;
+  /** @nullable */
+  pauseExpiresAt: string | null;
+  timeRemainingSeconds: number;
+}
+
+export type DungeonQuestionMode = typeof DungeonQuestionMode[keyof typeof DungeonQuestionMode];
+
+
+export const DungeonQuestionMode = {
+  standard: 'standard',
+  quick: 'quick',
+} as const;
 
 export interface DungeonQuestion {
   runId: string;
   subject: string;
   rank: string;
+  mode: DungeonQuestionMode;
   questionId: string;
   prompt: string;
   options: string[];
@@ -139,6 +178,13 @@ export interface DungeonQuestion {
   isBoss: boolean;
   playerHp: number;
   enemyHp: number;
+  /** @nullable */
+  expiresAt: string | null;
+  timeRemainingSeconds: number;
+  pauseUsed: boolean;
+  paused: boolean;
+  /** @nullable */
+  pauseExpiresAt: string | null;
 }
 
 export interface DungeonAnswerInput {
@@ -172,8 +218,131 @@ export interface DungeonAnswerResult {
   accuracy: number;
   levelUp: boolean;
   hunterRank: string;
+  previousHunterRank: string;
+  rankUp: boolean;
   branchUnlocked: boolean;
   nextQuestion: DungeonQuestion | null;
+}
+
+export interface DailyRewardStatus {
+  claimedToday: boolean;
+  welcomeBack: boolean;
+  /** @nullable */
+  claimedAt: string | null;
+  xpReward: number;
+  itemName: string;
+  itemQuantity: number;
+}
+
+export interface DailyRewardClaim {
+  claimed: boolean;
+  welcomeBack: boolean;
+  xpAwarded: number;
+  itemName: string;
+  itemQuantity: number;
+  /** @nullable */
+  claimedAt: string | null;
+  hunterRank: string;
+  previousHunterRank: string;
+  rankUp: boolean;
+}
+
+export interface EventAnswerInput {
+  /** @minLength 1 */
+  stepId: string;
+  /**
+     * @minimum 0
+     * @maximum 3
+     */
+  answerIndex: number;
+}
+
+export interface EventClue {
+  id: string;
+  position: number;
+  title: string;
+  scene: string;
+  clue: string;
+  revealed: boolean;
+  solved: boolean;
+}
+
+export type EventProblemSubject = typeof EventProblemSubject[keyof typeof EventProblemSubject];
+
+
+export const EventProblemSubject = {
+  Math: 'Math',
+  Chemistry: 'Chemistry',
+} as const;
+
+export interface EventProblem {
+  stepId: string;
+  title: string;
+  scene: string;
+  subject: EventProblemSubject;
+  difficulty: number;
+  prompt: string;
+  options: string[];
+  finale: boolean;
+  hpDamage: number;
+}
+
+export interface EventReward {
+  xp: number;
+  badge: string;
+  title: string;
+}
+
+export interface EventMonster {
+  name: string;
+  hp: number;
+  maxHp: number;
+}
+
+export type EventSessionStatus = typeof EventSessionStatus[keyof typeof EventSessionStatus];
+
+
+export const EventSessionStatus = {
+  active: 'active',
+  completed: 'completed',
+  expired: 'expired',
+} as const;
+
+export interface EventSession {
+  id: string;
+  status: EventSessionStatus;
+  caseTitle: string;
+  intro: string;
+  startedAt: string;
+  expiresAt: string;
+  timeRemainingSeconds: number;
+  focusRemaining: number;
+  focusTotal: number;
+  currentLeadIndex: number;
+  leadCount: number;
+  clues: EventClue[];
+  currentProblem: EventProblem | null;
+  monster: EventMonster | null;
+  reward: EventReward;
+  rewardGranted: boolean;
+}
+
+export interface EventSessionResponse {
+  available: boolean;
+  message: string;
+  session: EventSession | null;
+}
+
+export interface EventAnswerResult {
+  correct: boolean;
+  explanation: string;
+  focusRemaining: number;
+  session: EventSession;
+  rankUp: boolean;
+  hunterRank: string;
+  xpAwarded: number;
+  rewardGranted: boolean;
+  message: string;
 }
 
 export interface LeaderboardEntry {
@@ -194,6 +363,11 @@ export interface Tournament {
   prizePoolEtb: number;
   joined: boolean;
   completed: boolean;
+  paymentStatus: string;
+  /** @nullable */
+  checkoutUrl: string | null;
+  capacity: number;
+  isFull: boolean;
   totalRounds: number;
   roundDurationSeconds: number;
   payoutBreakdown: string[];
@@ -205,6 +379,8 @@ export interface TournamentEntry {
   joined: boolean;
   paymentStatus: string;
   message: string;
+  /** @nullable */
+  checkoutUrl: string | null;
 }
 
 export interface TournamentRoundQuestion {
@@ -350,6 +526,14 @@ export interface Subscription {
   tier: SubscriptionTier;
   priceEtb: number;
   billingStatus: string;
+  /** @nullable */
+  currentPeriodEnd: string | null;
+  /** @nullable */
+  graceEndsAt: string | null;
+  /** @nullable */
+  renewalDueAt: string | null;
+  /** @nullable */
+  checkoutUrl: string | null;
 }
 
 export type SubscriptionInputTier = typeof SubscriptionInputTier[keyof typeof SubscriptionInputTier];
@@ -363,6 +547,38 @@ export const SubscriptionInputTier = {
 
 export interface SubscriptionInput {
   tier: SubscriptionInputTier;
+}
+
+export interface PaymentRecord {
+  id: string;
+  txRef: string;
+  purpose: string;
+  amountEtb: number;
+  currency: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+  /** @nullable */
+  checkoutUrl: string | null;
+  /** @nullable */
+  refundStatus: string | null;
+  /** @nullable */
+  refundAmountEtb: number | null;
+}
+
+export interface PaymentHistory {
+  payments: PaymentRecord[];
+  adminView: boolean;
+}
+
+export interface WebhookAcknowledgement {
+  received: boolean;
+  duplicate: boolean;
+}
+
+export interface RefundResult {
+  status: string;
+  message: string;
 }
 
 export type GetLeaderboardsParams = {

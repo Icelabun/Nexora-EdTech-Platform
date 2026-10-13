@@ -27,17 +27,26 @@ import type {
   ClassInput,
   ClassJoinInput,
   ClassStudent,
+  DailyRewardClaim,
+  DailyRewardStatus,
   Dashboard,
   DungeonAnswerInput,
   DungeonAnswerResult,
+  DungeonPauseState,
   DungeonQuestion,
+  DungeonResetInput,
   DungeonStartInput,
+  EventAnswerInput,
+  EventAnswerResult,
+  EventSessionResponse,
   GetLeaderboardsParams,
   HealthStatus,
   LeaderboardEntry,
   LoginInput,
   Message,
   OnboardingInput,
+  PaymentHistory,
+  RefundResult,
   RegisterInput,
   StudentAssignment,
   Subject,
@@ -51,7 +60,8 @@ import type {
   TournamentScoreEntry,
   TutorInput,
   TutorReply,
-  User
+  User,
+  WebhookAcknowledgement
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -914,16 +924,31 @@ export const getAbandonDungeonUrl = (runId: string,) => {
 }
 
 /**
- * @summary Reset a dungeon after leaving the active session
+ * @summary Reset a dungeon after the focus grace period or a manual reset
  */
-export const abandonDungeon = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<Message> => {
+export const abandonDungeon = async (runId: string,
+    dungeonResetInput?: DungeonResetInput, options?: Parameters<typeof customFetch>[1]): Promise<Message> => {
 
-  return customFetch<Message>(getAbandonDungeonUrl(runId),
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<Message>(getAbandonDungeonUrl(runId),
   {
     ...options,
-    method: 'POST'
-
-
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(dungeonResetInput)
   }
 );}
 
@@ -948,9 +973,9 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
       const mutationFn: MutationFunction<Awaited<ReturnType<typeof abandonDungeon>>, AbandonDungeonMutationVariables> = (props) => {
-          const {runId} = props ?? {};
+          const {runId,data} = props ?? {};
 
-          return  abandonDungeon(runId,requestOptions)
+          return  abandonDungeon(runId,data,requestOptions)
         }
 
 
@@ -961,12 +986,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type AbandonDungeonMutationResult = NonNullable<Awaited<ReturnType<typeof abandonDungeon>>>
-
+    export type AbandonDungeonMutationBody = BodyType<DungeonResetInput> | undefined
     export type AbandonDungeonMutationError = ErrorType<unknown>
-    export type AbandonDungeonMutationVariables = {runId: string}
+    export type AbandonDungeonMutationVariables = {runId: string;data?: BodyType<DungeonResetInput>}
 
     /**
- * @summary Reset a dungeon after leaving the active session
+ * @summary Reset a dungeon after the focus grace period or a manual reset
  */
 export const useAbandonDungeon = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof abandonDungeon>>, TError,AbandonDungeonMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -977,6 +1002,154 @@ export const useAbandonDungeon = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getAbandonDungeonMutationOptions(options));
+    }
+
+export const getPauseDungeonUrl = (runId: string,) => {
+
+
+
+
+  return `/api/dungeons/${runId}/pause`
+}
+
+/**
+ * @summary Use the one server-limited pause for this run
+ */
+export const pauseDungeon = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<DungeonPauseState> => {
+
+  return customFetch<DungeonPauseState>(getPauseDungeonUrl(runId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getPauseDungeonMutationKey = () => ['pauseDungeon'] as const;
+
+export const getPauseDungeonMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseDungeon>>, TError,PauseDungeonMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof pauseDungeon>>, TError,PauseDungeonMutationVariables, TContext> => {
+
+const mutationKey = getPauseDungeonMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof pauseDungeon>>, PauseDungeonMutationVariables> = (props) => {
+          const {runId} = props ?? {};
+
+          return  pauseDungeon(runId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PauseDungeonMutationResult = NonNullable<Awaited<ReturnType<typeof pauseDungeon>>>
+
+    export type PauseDungeonMutationError = ErrorType<unknown>
+    export type PauseDungeonMutationVariables = {runId: string}
+
+    /**
+ * @summary Use the one server-limited pause for this run
+ */
+export const usePauseDungeon = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseDungeon>>, TError,PauseDungeonMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof pauseDungeon>>,
+        TError,
+        PauseDungeonMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPauseDungeonMutationOptions(options));
+    }
+
+export const getResumeDungeonUrl = (runId: string,) => {
+
+
+
+
+  return `/api/dungeons/${runId}/resume`
+}
+
+/**
+ * @summary Resume a paused dungeon
+ */
+export const resumeDungeon = async (runId: string, options?: Parameters<typeof customFetch>[1]): Promise<DungeonPauseState> => {
+
+  return customFetch<DungeonPauseState>(getResumeDungeonUrl(runId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getResumeDungeonMutationKey = () => ['resumeDungeon'] as const;
+
+export const getResumeDungeonMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeDungeon>>, TError,ResumeDungeonMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof resumeDungeon>>, TError,ResumeDungeonMutationVariables, TContext> => {
+
+const mutationKey = getResumeDungeonMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resumeDungeon>>, ResumeDungeonMutationVariables> = (props) => {
+          const {runId} = props ?? {};
+
+          return  resumeDungeon(runId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResumeDungeonMutationResult = NonNullable<Awaited<ReturnType<typeof resumeDungeon>>>
+
+    export type ResumeDungeonMutationError = ErrorType<unknown>
+    export type ResumeDungeonMutationVariables = {runId: string}
+
+    /**
+ * @summary Resume a paused dungeon
+ */
+export const useResumeDungeon = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeDungeon>>, TError,ResumeDungeonMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof resumeDungeon>>,
+        TError,
+        ResumeDungeonMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResumeDungeonMutationOptions(options));
     }
 
 export const getChooseDungeonBranchUrl = () => {
@@ -1065,6 +1238,396 @@ export const useChooseDungeonBranch = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getChooseDungeonBranchMutationOptions(options));
+    }
+
+export const getGetDailyRewardUrl = () => {
+
+
+
+
+  return `/api/daily-reward`
+}
+
+/**
+ * @summary Get today's Gate Opens reward status
+ */
+export const getDailyReward = async ( options?: Parameters<typeof customFetch>[1]): Promise<DailyRewardStatus> => {
+
+  return customFetch<DailyRewardStatus>(getGetDailyRewardUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDailyRewardQueryKey = () => {
+    return [
+    `/api/daily-reward`
+    ] as const;
+    }
+
+
+export const getGetDailyRewardQueryOptions = <TData = Awaited<ReturnType<typeof getDailyReward>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDailyReward>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDailyRewardQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDailyReward>>> = ({ signal }) => getDailyReward({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDailyReward>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDailyRewardQueryResult = NonNullable<Awaited<ReturnType<typeof getDailyReward>>>
+export type GetDailyRewardQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get today's Gate Opens reward status
+ */
+
+export function useGetDailyReward<TData = Awaited<ReturnType<typeof getDailyReward>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDailyReward>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDailyRewardQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getClaimDailyRewardUrl = () => {
+
+
+
+
+  return `/api/daily-reward/claim`
+}
+
+/**
+ * @summary Claim today's non-streak daily reward
+ */
+export const claimDailyReward = async ( options?: Parameters<typeof customFetch>[1]): Promise<DailyRewardClaim> => {
+
+  return customFetch<DailyRewardClaim>(getClaimDailyRewardUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getClaimDailyRewardMutationKey = () => ['claimDailyReward'] as const;
+
+export const getClaimDailyRewardMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimDailyReward>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof claimDailyReward>>, TError,void, TContext> => {
+
+const mutationKey = getClaimDailyRewardMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof claimDailyReward>>, void> = () => {
+
+
+          return  claimDailyReward(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ClaimDailyRewardMutationResult = NonNullable<Awaited<ReturnType<typeof claimDailyReward>>>
+
+    export type ClaimDailyRewardMutationError = ErrorType<unknown>
+
+
+    /**
+ * @summary Claim today's non-streak daily reward
+ */
+export const useClaimDailyReward = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof claimDailyReward>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof claimDailyReward>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getClaimDailyRewardMutationOptions(options));
+    }
+
+export const getGetEventSessionUrl = () => {
+
+
+
+
+  return `/api/event/session`
+}
+
+/**
+ * @summary Resume the student's persisted supernatural investigation
+ */
+export const getEventSession = async ( options?: Parameters<typeof customFetch>[1]): Promise<EventSessionResponse> => {
+
+  return customFetch<EventSessionResponse>(getGetEventSessionUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEventSessionQueryKey = () => {
+    return [
+    `/api/event/session`
+    ] as const;
+    }
+
+
+export const getGetEventSessionQueryOptions = <TData = Awaited<ReturnType<typeof getEventSession>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEventSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEventSessionQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEventSession>>> = ({ signal }) => getEventSession({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEventSession>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEventSessionQueryResult = NonNullable<Awaited<ReturnType<typeof getEventSession>>>
+export type GetEventSessionQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Resume the student's persisted supernatural investigation
+ */
+
+export function useGetEventSession<TData = Awaited<ReturnType<typeof getEventSession>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEventSession>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEventSessionQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getStartEventSessionUrl = () => {
+
+
+
+
+  return `/api/event/session/start`
+}
+
+/**
+ * @summary Start the one-time supernatural case after choosing its door
+ */
+export const startEventSession = async ( options?: Parameters<typeof customFetch>[1]): Promise<EventSessionResponse> => {
+
+  return customFetch<EventSessionResponse>(getStartEventSessionUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getStartEventSessionMutationKey = () => ['startEventSession'] as const;
+
+export const getStartEventSessionMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startEventSession>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof startEventSession>>, TError,void, TContext> => {
+
+const mutationKey = getStartEventSessionMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof startEventSession>>, void> = () => {
+
+
+          return  startEventSession(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type StartEventSessionMutationResult = NonNullable<Awaited<ReturnType<typeof startEventSession>>>
+
+    export type StartEventSessionMutationError = ErrorType<unknown>
+
+
+    /**
+ * @summary Start the one-time supernatural case after choosing its door
+ */
+export const useStartEventSession = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof startEventSession>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof startEventSession>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getStartEventSessionMutationOptions(options));
+    }
+
+export const getAnswerEventProblemUrl = () => {
+
+
+
+
+  return `/api/event/session/answer`
+}
+
+/**
+ * @summary Submit the current case or monster problem
+ */
+export const answerEventProblem = async (eventAnswerInput: EventAnswerInput, options?: Parameters<typeof customFetch>[1]): Promise<EventAnswerResult> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<EventAnswerResult>(getAnswerEventProblemUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(eventAnswerInput)
+  }
+);}
+
+
+
+
+
+export const getAnswerEventProblemMutationKey = () => ['answerEventProblem'] as const;
+
+export const getAnswerEventProblemMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerEventProblem>>, TError,AnswerEventProblemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof answerEventProblem>>, TError,AnswerEventProblemMutationVariables, TContext> => {
+
+const mutationKey = getAnswerEventProblemMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof answerEventProblem>>, AnswerEventProblemMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  answerEventProblem(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AnswerEventProblemMutationResult = NonNullable<Awaited<ReturnType<typeof answerEventProblem>>>
+    export type AnswerEventProblemMutationBody = BodyType<EventAnswerInput>
+    export type AnswerEventProblemMutationError = ErrorType<unknown>
+    export type AnswerEventProblemMutationVariables = {data: BodyType<EventAnswerInput>}
+
+    /**
+ * @summary Submit the current case or monster problem
+ */
+export const useAnswerEventProblem = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof answerEventProblem>>, TError,AnswerEventProblemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof answerEventProblem>>,
+        TError,
+        AnswerEventProblemMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAnswerEventProblemMutationOptions(options));
     }
 
 export const getGetLeaderboardsUrl = (params?: GetLeaderboardsParams,) => {
@@ -2211,7 +2774,7 @@ export const getSelectSubscriptionUrl = () => {
 }
 
 /**
- * @summary Select a subscription tier using mock billing
+ * @summary Choose Free or create a hosted Arena Pass checkout
  */
 export const selectSubscription = async (subscriptionInput: SubscriptionInput, options?: Parameters<typeof customFetch>[1]): Promise<Subscription> => {
 
@@ -2277,7 +2840,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SelectSubscriptionMutationVariables = {data: BodyType<SubscriptionInput>}
 
     /**
- * @summary Select a subscription tier using mock billing
+ * @summary Choose Free or create a hosted Arena Pass checkout
  */
 export const useSelectSubscription = <TError = ErrorType<unknown>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof selectSubscription>>, TError,SelectSubscriptionMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
@@ -2288,5 +2851,305 @@ export const useSelectSubscription = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSelectSubscriptionMutationOptions(options));
+    }
+
+export const getGetPaymentHistoryUrl = () => {
+
+
+
+
+  return `/api/payments`
+}
+
+/**
+ * @summary List the signed-in student's payments or all payments for an admin
+ */
+export const getPaymentHistory = async ( options?: Parameters<typeof customFetch>[1]): Promise<PaymentHistory> => {
+
+  return customFetch<PaymentHistory>(getGetPaymentHistoryUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetPaymentHistoryQueryKey = () => {
+    return [
+    `/api/payments`
+    ] as const;
+    }
+
+
+export const getGetPaymentHistoryQueryOptions = <TData = Awaited<ReturnType<typeof getPaymentHistory>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaymentHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetPaymentHistoryQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getPaymentHistory>>> = ({ signal }) => getPaymentHistory({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getPaymentHistory>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetPaymentHistoryQueryResult = NonNullable<Awaited<ReturnType<typeof getPaymentHistory>>>
+export type GetPaymentHistoryQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List the signed-in student's payments or all payments for an admin
+ */
+
+export function useGetPaymentHistory<TData = Awaited<ReturnType<typeof getPaymentHistory>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getPaymentHistory>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetPaymentHistoryQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getChapaWebhookUrl = () => {
+
+
+
+
+  return `/api/payments/chapa/webhook`
+}
+
+/**
+ * This endpoint verifies the raw-body Chapa signature and checks the transaction server-side. Browser redirects never grant access.
+ * @summary Receive signed Chapa payment and refund events
+ */
+export const chapaWebhook = async ( options?: Parameters<typeof customFetch>[1]): Promise<WebhookAcknowledgement> => {
+
+  return customFetch<WebhookAcknowledgement>(getChapaWebhookUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getChapaWebhookMutationKey = () => ['chapaWebhook'] as const;
+
+export const getChapaWebhookMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chapaWebhook>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof chapaWebhook>>, TError,void, TContext> => {
+
+const mutationKey = getChapaWebhookMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof chapaWebhook>>, void> = () => {
+
+
+          return  chapaWebhook(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ChapaWebhookMutationResult = NonNullable<Awaited<ReturnType<typeof chapaWebhook>>>
+
+    export type ChapaWebhookMutationError = ErrorType<void>
+
+
+    /**
+ * @summary Receive signed Chapa payment and refund events
+ */
+export const useChapaWebhook = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof chapaWebhook>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof chapaWebhook>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getChapaWebhookMutationOptions(options));
+    }
+
+export const getRefundPaymentUrl = (paymentId: string,) => {
+
+
+
+
+  return `/api/payments/${paymentId}/refund`
+}
+
+/**
+ * @summary Start or retry an admin refund
+ */
+export const refundPayment = async (paymentId: string, options?: Parameters<typeof customFetch>[1]): Promise<RefundResult> => {
+
+  return customFetch<RefundResult>(getRefundPaymentUrl(paymentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRefundPaymentMutationKey = () => ['refundPayment'] as const;
+
+export const getRefundPaymentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundPayment>>, TError,RefundPaymentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof refundPayment>>, TError,RefundPaymentMutationVariables, TContext> => {
+
+const mutationKey = getRefundPaymentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof refundPayment>>, RefundPaymentMutationVariables> = (props) => {
+          const {paymentId} = props ?? {};
+
+          return  refundPayment(paymentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RefundPaymentMutationResult = NonNullable<Awaited<ReturnType<typeof refundPayment>>>
+
+    export type RefundPaymentMutationError = ErrorType<unknown>
+    export type RefundPaymentMutationVariables = {paymentId: string}
+
+    /**
+ * @summary Start or retry an admin refund
+ */
+export const useRefundPayment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundPayment>>, TError,RefundPaymentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof refundPayment>>,
+        TError,
+        RefundPaymentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getRefundPaymentMutationOptions(options));
+    }
+
+export const getCancelTournamentUrl = (tournamentId: string,) => {
+
+
+
+
+  return `/api/admin/tournaments/${tournamentId}/cancel`
+}
+
+/**
+ * @summary Cancel a tournament and initiate refunds for confirmed paid entries
+ */
+export const cancelTournament = async (tournamentId: string, options?: Parameters<typeof customFetch>[1]): Promise<Message> => {
+
+  return customFetch<Message>(getCancelTournamentUrl(tournamentId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getCancelTournamentMutationKey = () => ['cancelTournament'] as const;
+
+export const getCancelTournamentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelTournament>>, TError,CancelTournamentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof cancelTournament>>, TError,CancelTournamentMutationVariables, TContext> => {
+
+const mutationKey = getCancelTournamentMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof cancelTournament>>, CancelTournamentMutationVariables> = (props) => {
+          const {tournamentId} = props ?? {};
+
+          return  cancelTournament(tournamentId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CancelTournamentMutationResult = NonNullable<Awaited<ReturnType<typeof cancelTournament>>>
+
+    export type CancelTournamentMutationError = ErrorType<unknown>
+    export type CancelTournamentMutationVariables = {tournamentId: string}
+
+    /**
+ * @summary Cancel a tournament and initiate refunds for confirmed paid entries
+ */
+export const useCancelTournament = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelTournament>>, TError,CancelTournamentMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof cancelTournament>>,
+        TError,
+        CancelTournamentMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCancelTournamentMutationOptions(options));
     }
 

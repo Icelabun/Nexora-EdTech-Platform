@@ -16,6 +16,11 @@ export interface Tournament {
   prizePoolEtb: number;
   joined: boolean;
   completed: boolean;
+  paymentStatus: string;
+  /** @nullable */
+  checkoutUrl: string | null;
+  capacity: number;
+  isFull: boolean;
   totalRounds: number;
   roundDurationSeconds: number;
   payoutBreakdown: string[];
