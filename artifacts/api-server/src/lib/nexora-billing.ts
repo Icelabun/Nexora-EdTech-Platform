@@ -21,7 +21,7 @@ export function publicAppOrigin(): string {
   if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
     throw new Error("NEXORA_APP_URL must be a valid http(s) application origin.");
   }
-  return url.origin;
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
 function createTxRef(purpose: string): string {
@@ -44,7 +44,7 @@ export async function createHostedPayment(input: PaymentIntentInput): Promise<an
     relatedEntryId: input.relatedEntryId ?? null,
   });
   const [firstName = "Nexora", ...lastNames] = String(input.user.name ?? "Student").trim().split(/\s+/);
-  const returnUrl = new URL(input.returnPath, origin);
+  const returnUrl = new URL(`${origin}${input.returnPath}`);
   returnUrl.searchParams.set("payment", "processing");
   returnUrl.searchParams.set("tx_ref", txRef);
   try {

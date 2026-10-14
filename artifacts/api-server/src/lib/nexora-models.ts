@@ -191,6 +191,7 @@ const paymentSchema = new Schema(
     refundAmountEtb: { type: Number, default: null },
     reconciliationStatus: { type: String, default: null },
     reconciledAt: { type: Date, default: null },
+    reconciliationDetails: { type: Schema.Types.Mixed, default: null },
     webhookProcessedAt: { type: Date, default: null },
     entitlementAppliedAt: { type: Date, default: null },
   },

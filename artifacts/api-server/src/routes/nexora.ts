@@ -59,6 +59,7 @@ import {
   DungeonRunModel,
   QuestionModel,
   SubjectModel,
+  SubscriptionModel,
   UserModel,
 } from "../lib/nexora-models";
 import { sendAssignmentNotification, sendWelcomeEmail } from "../lib/nexora-email";
@@ -440,7 +441,6 @@ router.post("/dungeons/:runId/answer", requireNexoraAuth, async (req, res): Prom
   let hunterRank = rankForXp(user.xp);
   user.hunterRank = hunterRank;
   const rankUp = hunterRank !== previousHunterRank;
-  const now = new Date();
   const currentDay = new Date(now);
   currentDay.setHours(0, 0, 0, 0);
   if (user.lastActiveAt) {
@@ -493,11 +493,15 @@ router.post("/dungeons/:runId/abandon", requireNexoraAuth, async (req, res): Pro
     return;
   }
   const parsedReason = AbandonDungeonBody.safeParse(req.body ?? {});
-  const reason = parsedReason.success ? parsedReason.data.reason : "manual";
+  if (!parsedReason.success) {
+    res.status(400).json({ error: parsedReason.error.message });
+    return;
+  }
+  const reason = parsedReason.data.reason ?? "manual";
   const userId = authenticatedUserId(req);
   const run = await DungeonRunModel.findOneAndUpdate(
     { _id: params.data.runId, userId, status: "active" },
-    { $set: { status: "abandoned", completedAt: new Date() } },
+    { $set: { status: reason === "timer-expired" ? "failed" : "abandoned", completedAt: new Date() } },
   );
   if (!run) {
     res.status(404).json({ error: "Active dungeon run not found." });

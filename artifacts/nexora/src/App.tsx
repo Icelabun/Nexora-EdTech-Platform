@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Link, Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import { ArrowDownRight, ArrowRight, BookOpen, Check, ChevronRight, Crown, LockKeyhole, LogOut, MessageCircle, Shield, Swords, Trophy } from 'lucide-react';
@@ -8,11 +8,12 @@ import {
   useAnswerDungeonQuestion, useAnswerTournamentRound, useAskTutor, useCreateAssignment, useCreateClass, useGetClasses,
   useChooseDungeonBranch, useGetClassStudents, useGetCurrentUser, useGetDashboard,
   useGetAssignments, useGetLeaderboards, useGetSubjects, useGetSubscription, useGetTournamentLeaderboard, useGetTournaments,
-  useJoinClass, useJoinTournament, useLogin, useLogout, useRegister, useSaveOnboarding,
+  useJoinClass, useJoinTournament, useLogin, useLogout, usePauseDungeon, useRegister, useResumeDungeon, useSaveOnboarding,
   useSelectSubscription, useStartDungeon, useStartTournamentRound,
 } from '@workspace/api-client-react';
 import type { DungeonQuestion, StudentAssignment, Subject, Tournament, TournamentAnswer, TournamentRoundQuestion, User } from '@workspace/api-client-react';
 import NotFound from '@/pages/not-found';
+import { AdminPaymentsPage, DashboardReward, DetectiveEventPage as ServerEventPage, RankCelebration, StudentPaymentsPage } from '@/features/ServerFeatures';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: 1, staleTime: 20_000 } } });
 const ranks = ['E', 'D', 'C', 'B', 'A', 'S'];
@@ -44,10 +45,10 @@ function Topbar() {
 function AppNav({ user, onLogout }: { user?: User; onLogout: () => void }) {
   const [path] = useLocation();
   const links = user?.role === 'admin'
-    ? [['/admin', 'Overview'], ['/leaderboard', 'Rankings']]
+    ? [['/admin', 'Overview'], ['/admin/payments', 'Payments'], ['/leaderboard', 'Rankings']]
     : user?.role === 'teacher'
     ? [['/teacher', 'Classes'], ['/leaderboard', 'Rankings'], ['/subscription', 'Plan']]
-    : [['/app', 'Overview'], ['/dungeon', 'Dungeon'], ['/tournaments', 'Arena'], ['/leaderboard', 'Ranks'], ['/tutor', 'Tutor'], ['/subscription', 'Plan']];
+    : [['/app', 'Overview'], ['/dungeon', 'Dungeon'], ['/tournaments', 'Arena'], ['/leaderboard', 'Ranks'], ['/tutor', 'Tutor'], ['/subscription', 'Plan'], ['/payments', 'Payments']];
   return <div className="app-top"><Brand /><nav className="app-nav">{links.map(([href, label]) =>
     <Link key={href} href={href} className={path === href ? 'active' : ''} data-testid={`link-nav-${label.toLowerCase()}`}>{label}</Link>)}</nav>
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span className="user-chip">{user?.name ?? 'Hunter'} · {user?.hunterRank ?? 'E-Rank'}</span>
@@ -204,7 +205,8 @@ function DashboardPage() {
   if(isLoading)return <Content><PageHead kicker="Your command center" title="Loading your dossier…"/><Loading/></Content>;
   if(isError||!data)return <Content><PageHead kicker="Your command center" title="Your dossier is offline"/><LoadError retry={()=>void refetch()}/></Content>;
   const {user,subjectMastery,recentRuns,dailyRunsRemaining}=data;
-  return <Content><div className="panel dashboard-hero"><div><div className="eyebrow">Your next move</div><h2>Good to see you,<br/>{user.name.split(' ')[0]}.</h2><p>Your path is yours to shape. One run at a time.</p><Link href="/dungeon" className="btn btn-gold" style={{marginTop:12}}>Enter a dungeon <Swords size={15}/></Link><div className="statline"><span><b>{user.xp.toLocaleString()} XP</b>Total experience</span><span><b>{user.streak} days</b>Current streak</span><span><b>{dailyRunsRemaining}</b>Runs remaining today</span></div></div><div className="level-disc"><div><small>HUNTER RANK</small><strong>{user.hunterRank}</strong><small>LEVEL {user.level}</small></div></div></div>
+  return <Content><div className="panel dashboard-hero"><div><div className="eyebrow">Your next move</div><h2>Good to see you,<br/>{user.name.split(' ')[0]}.</h2><p>Your path is yours to shape. One run at a time.</p><Link href="/dungeon" className="btn btn-gold" style={{marginTop:12}}>Enter a dungeon <Swords size={15}/></Link><div className="statline"><span><b>{user.xp.toLocaleString()} XP</b>Total experience</span><span><b>{user.hunterRank}</b>Your hunter rank</span><span><b>{dailyRunsRemaining}</b>Runs remaining today</span></div></div><div className="level-disc"><div><small>HUNTER RANK</small><strong>{user.hunterRank}</strong><small>LEVEL {user.level}</small></div></div></div>
+    <DashboardReward studentName={user.name.split(' ')[0]}/>
     <div className="grid-2" style={{marginTop:16}}><section className="panel"><div className="panel-title"><h2>Subject mastery</h2><small>YOUR SKILL MAP</small></div>{subjectMastery.length?subjectMastery.map((s,i)=><div className="subject-line" key={`${s.subject}-${i}`}><div><strong>{s.subject}</strong><div className="meter"><i style={{width:`${Math.max(0,Math.min(100,s.mastery))}%`}}/></div></div><small>{s.mastery}%</small></div>):<div className="empty-state"><strong>First steps count</strong>Your subject map will take shape after a few runs.</div>}</section>
        <section className="panel"><div className="panel-title"><h2>Recent runs</h2><small>FIELD NOTES</small></div>{recentRuns.length?recentRuns.slice(0,5).map(run=><div className="list-row" key={run.id}><div><strong>{run.subject} · {run.rank}-Rank</strong><small>{new Date(run.completedAt).toLocaleDateString()}</small></div><span className="mono gold">+{run.xpEarned} XP</span></div>):<div className="empty-state"><strong>Fresh slate</strong>Your completed runs will appear here.</div>}</section></div>
     <AssignmentPanel/><JoinClassPanel/>
@@ -215,12 +217,15 @@ function Content({children}:{children:ReactNode}){return <main className="conten
 function DungeonPage() {
   const {data:user}=useGetCurrentUser();
   const {data:subjects,isLoading:subjectsLoading,isError:subjectsError,refetch}=useGetSubjects();
-  const start=useStartDungeon(); const answer=useAnswerDungeonQuestion(); const abandon=useAbandonDungeon(); const chooseBranch=useChooseDungeonBranch(); const qc=useQueryClient();const [,setLocation]=useLocation();
+  const start=useStartDungeon(); const answer=useAnswerDungeonQuestion(); const abandon=useAbandonDungeon(); const pause=usePauseDungeon(); const resume=useResumeDungeon(); const chooseBranch=useChooseDungeonBranch(); const qc=useQueryClient();const [,setLocation]=useLocation();
   const initialParams=new URLSearchParams(window.location.search);
-  const [subject,setSubject]=useState(initialParams.get('subject')??'');const [rank,setRank]=useState(initialParams.get('rank')??'E');const [question,setQuestion]=useState<DungeonQuestion|null>(null);const [answerIndex,setAnswerIndex]=useState<number|null>(null);const [result,setResult]=useState<Awaited<ReturnType<typeof answer.mutateAsync>>|null>(null);const [error,setError]=useState('');const [branch,setBranch]=useState(false);const [branchChoiceResolved,setBranchChoiceResolved]=useState(false);const [branchError,setBranchError]=useState('');const [resetNotice,setResetNotice]=useState('');
+  const [subject,setSubject]=useState(initialParams.get('subject')??'');const [rank,setRank]=useState(initialParams.get('rank')??'E');const [mode,setMode]=useState<'standard'|'quick'>('standard');const [question,setQuestion]=useState<DungeonQuestion|null>(null);const [answerIndex,setAnswerIndex]=useState<number|null>(null);const [result,setResult]=useState<Awaited<ReturnType<typeof answer.mutateAsync>>|null>(null);const [error,setError]=useState('');const [branch,setBranch]=useState(false);const [branchChoiceResolved,setBranchChoiceResolved]=useState(false);const [branchError,setBranchError]=useState('');const [resetNotice,setResetNotice]=useState('');const [focusGrace,setFocusGrace]=useState<number|null>(null);const [paused,setPaused]=useState(false);const [pauseRemaining,setPauseRemaining]=useState(0);const [runSeconds,setRunSeconds]=useState(0);
   useEffect(()=>{if(user?.branchUnlocked&&!user.branchChoice&&!branchChoiceResolved){setBranch(true);}},[user?.branchUnlocked,user?.branchChoice,branchChoiceResolved]);
-  useEffect(()=>{if(!question)return;const reset=()=>{if(document.visibilityState==='hidden'){abandon.mutate({runId:question.runId});setQuestion(null);setResult(null);setResetNotice('The run was reset because the session left focus. Your next attempt starts fresh.');}};const blur=()=>{abandon.mutate({runId:question.runId});setQuestion(null);setResult(null);setResetNotice('The run was reset when focus left the arena. Start a fresh run when ready.');};document.addEventListener('visibilitychange',reset);window.addEventListener('blur',blur);return()=>{document.removeEventListener('visibilitychange',reset);window.removeEventListener('blur',blur)}},[question,abandon]);
-  async function begin(){setError('');setResetNotice('');try{const q=await start.mutateAsync({data:{subject,rank:rank as 'E'|'D'|'C'|'B'|'A'|'S'}});setQuestion(q);setResult(null);setAnswerIndex(null);}catch(e){setError(e instanceof Error?e.message:'Could not open this dungeon. Try another route.');}}
+  useEffect(()=>{if(!question||result?.completed||paused)return;let timer:number|undefined;let deadline=0;let didReset=false;const resetRun=()=>{if(didReset)return;didReset=true;if(timer)window.clearInterval(timer);timer=undefined;setFocusGrace(null);abandon.mutate({runId:question.runId,data:{reason:'focus-grace-expired'}});setQuestion(null);setResult(null);setResetNotice('The five-second return window ended. Your run was safely closed; start again whenever you are ready.');};const beginGrace=()=>{if(timer)return;deadline=Date.now()+5000;setFocusGrace(5);timer=window.setInterval(()=>{const remaining=Math.max(0,Math.ceil((deadline-Date.now())/1000));setFocusGrace(remaining);if(remaining===0)resetRun();},100);};const restore=()=>{if(document.visibilityState!=='visible'||!timer)return;if(Date.now()>=deadline){resetRun();return;}window.clearInterval(timer);timer=undefined;setFocusGrace(null);};const visibility=()=>document.visibilityState==='hidden'?beginGrace():restore();window.addEventListener('blur',beginGrace);window.addEventListener('focus',restore);document.addEventListener('visibilitychange',visibility);return()=>{if(timer)window.clearInterval(timer);window.removeEventListener('blur',beginGrace);window.removeEventListener('focus',restore);document.removeEventListener('visibilitychange',visibility);}},[question?.runId,result?.completed,paused]);
+  useEffect(()=>{if(!paused||!question)return;const deadline=Date.now()+pauseRemaining*1000;const timer=window.setInterval(()=>{const remaining=Math.max(0,Math.ceil((deadline-Date.now())/1000));setPauseRemaining(remaining);if(remaining===0){window.clearInterval(timer);resume.mutate({runId:question.runId},{onSuccess:state=>{setPaused(state.paused);setPauseRemaining(0);setRunSeconds(state.timeRemainingSeconds);setQuestion(q=>q?{...q,paused:state.paused,pauseUsed:state.pauseUsed,pauseExpiresAt:state.pauseExpiresAt,timeRemainingSeconds:state.timeRemainingSeconds}:q);},onError:()=>setError('The automatic resume could not be confirmed. Use Resume run to reconnect.')});}},100);return()=>window.clearInterval(timer);},[paused,question?.runId]);
+  useEffect(()=>{if(!question||question.mode!=='quick'||paused||result?.completed)return;let remaining=runSeconds;const timer=window.setInterval(()=>setRunSeconds(s=>{remaining=Math.max(0,remaining-1);if(remaining===0){window.clearInterval(timer);abandon.mutate({runId:question.runId,data:{reason:'timer-expired'}});setQuestion(null);setResult(null);setResetNotice('The five-minute Quick run timer ended. Your next session is ready whenever you are.');return 0;}return remaining;}),1000);return()=>window.clearInterval(timer);},[question?.questionId,question?.mode,paused,result?.completed]);
+  async function begin(){setError('');setResetNotice('');try{const q=await start.mutateAsync({data:{subject,rank:rank as 'E'|'D'|'C'|'B'|'A'|'S',mode}});setQuestion(q);setRunSeconds(q.timeRemainingSeconds);setPaused(q.paused);setPauseRemaining(q.pauseExpiresAt?Math.max(0,Math.ceil((new Date(q.pauseExpiresAt).getTime()-Date.now())/1000)):0);setResult(null);setAnswerIndex(null);}catch(e){setError(e instanceof Error?e.message:'Could not open this dungeon. Try another route.');}}
+  async function togglePause(){if(!question)return;try{const state=paused?await resume.mutateAsync({runId:question.runId}):await pause.mutateAsync({runId:question.runId});setPaused(state.paused);setPauseRemaining(state.paused&&state.pauseExpiresAt?Math.max(0,Math.ceil((new Date(state.pauseExpiresAt).getTime()-Date.now())/1000)):0);if(!state.paused)setRunSeconds(state.timeRemainingSeconds);setQuestion(q=>q?{...q,paused:state.paused,pauseUsed:state.pauseUsed,pauseExpiresAt:state.pauseExpiresAt,timeRemainingSeconds:state.timeRemainingSeconds}:q);}catch(e){setError(e instanceof Error?e.message:'Pause state could not be updated.');}}
   async function submit(index:number){if(!question||answer.isPending)return;setAnswerIndex(index);setError('');try{const r=await answer.mutateAsync({runId:question.runId,data:{questionId:question.questionId,answerIndex:index}});setResult(r);if(r.completed&&r.branchUnlocked&&r.accuracy>=95&&!branchChoiceResolved){setBranch(true);setBranchError('');}if(r.completed){qc.invalidateQueries({queryKey:getGetDashboardQueryKey()});qc.invalidateQueries({queryKey:getGetCurrentUserQueryKey()});}}catch(e){setError(e instanceof Error?e.message:'Answer did not reach the server. Try again.');setAnswerIndex(null);}}
   async function selectBranch(choice:'solo'|'event'){if(chooseBranch.isPending||branchChoiceResolved)return;setBranchError('');try{await chooseBranch.mutateAsync({data:{choice}});setBranchChoiceResolved(true);setBranch(false);void qc.invalidateQueries({queryKey:getGetCurrentUserQueryKey()});if(choice==='event')setLocation('/event');}catch(e){setBranchError(e instanceof Error?e.message:'Could not save your Two Doors choice. Try again.');}}
   function next(){if(result?.nextQuestion){setQuestion(result.nextQuestion);setResult(null);setAnswerIndex(null);}else{setQuestion(null);setResult(null);}}
@@ -231,15 +236,18 @@ function DungeonPage() {
       {subjectsLoading?<Loading rows={3}/>:subjectsError?<LoadError retry={()=>void refetch()}/>:<div className="subject-select-grid">{(subjects??[]).map(s=><button key={s.id} className={`subject-pick ${subject===s.name?'selected':''}`} onClick={()=>setSubject(s.name)} data-testid={`button-dungeon-subject-${s.id}`}><span>{s.name}</span><small>{s.questionCount} questions · {s.mastery}% mastery</small></button>)}</div>}
       {!subjectsLoading&&!subjectsError&&!(subjects?.length)&&<div className="empty-state">No subjects are available yet.</div>}
       <div className="panel-title" style={{marginTop:25}}><h2>02 / Rank</h2><small>SET THE PACE</small></div><div className="rank-row">{ranks.map(r=><button key={r} onClick={()=>setRank(r)} className={`rank-btn ${rank===r?'selected':''}`} data-testid={`button-rank-${r}`}>{r}-RANK</button>)}</div>
+      <div className="panel-title" style={{marginTop:25}}><h2>03 / Run style</h2><small>CHOOSE YOUR WINDOW</small></div><div className="rank-row"><button className={`rank-btn ${mode==='standard'?'selected':''}`} onClick={()=>setMode('standard')} data-testid="button-dungeon-standard">Standard</button><button className={`rank-btn ${mode==='quick'?'selected':''}`} onClick={()=>setMode('quick')} data-testid="button-dungeon-quick">Quick · 5 questions · 5 minutes</button></div>
       {error&&<div className="form-error">{error}</div>}<button className="btn btn-gold" disabled={!subject||start.isPending} onClick={()=>void begin()} data-testid="button-start-dungeon">{start.isPending?'Opening the gate…':'Enter the dungeon'} <Swords size={15}/></button>
     </section><aside className="panel"><div className="eyebrow">A quick briefing</div><h2 className="serif" style={{fontSize:28}}>Five questions.<br/>One clean run.</h2><p className="muted" style={{lineHeight:1.8,fontSize:13}}>Your HP, enemy HP, XP and outcomes are calculated by the server. Stay in the arena until your run resolves.</p><div className="list-row"><span>Session focus</span><Shield size={16} className="gold"/></div><div className="list-row"><span>Boss encounter</span><Swords size={16} className="gold"/></div><div className="list-row"><span>Progress saved server-side</span><LockKeyhole size={16} className="gold"/></div></aside></div>
     {branchModal}</Content>;
-  return <Content><PageHead kicker={`${question.subject} / ${question.rank}-Rank`} title={result?.completed?'Run complete':`Question ${question.questionNumber} of ${question.totalQuestions}`} copy="Stay in focus. Your progress is held by the arena."/>
+  return <Content><PageHead kicker={`${question.subject} / ${question.rank}-Rank`} title={result?.completed?'Run complete':`Question ${question.questionNumber} of ${question.totalQuestions}`} copy={question.mode==='quick'?`Quick run · ${Math.floor(runSeconds/60).toString().padStart(2,'0')}:${(runSeconds%60).toString().padStart(2,'0')} remaining · server timed for five minutes.`:'Stay in focus. Your progress is held by the arena.'} action={<button className="btn btn-quiet" onClick={()=>void togglePause()} disabled={pause.isPending||resume.isPending||(!paused&&question.pauseUsed)} data-testid="button-dungeon-pause">{paused?`Resume · ${pauseRemaining}s`:question.pauseUsed?'Pause used':'Pause once'}</button>}/>
+    {focusGrace!==null&&<div className="focus-countdown" role="alert" data-testid="status-focus-countdown"><strong>Return to the dungeon</strong><span>Your run will close in {focusGrace} seconds.</span></div>}
+    {paused&&<div className="pause-cover" role="status" data-testid="status-dungeon-paused"><div><Shield size={25}/><strong>Run paused</strong><span>Question covered · {pauseRemaining} seconds remain</span><button className="btn btn-gold" onClick={()=>void togglePause()} disabled={resume.isPending}>Resume run</button></div></div>}
     <div className="dungeon-top"><div className="hp-group"><div className="hp-label"><span>YOUR HP</span><span>{result?.playerHp??question.playerHp}</span></div><div className="hp-bar"><i style={{width:`${Math.max(0,Math.min(100,result?.playerHp??question.playerHp))}%`}}/></div></div><div className="hp-group"><div className="hp-label"><span>{question.isBoss?'BOSS':'ENEMY'} HP</span><span>{result?.enemyHp??question.enemyHp}</span></div><div className="hp-bar enemy"><i style={{width:`${Math.max(0,Math.min(100,result?.enemyHp??question.enemyHp))}%`}}/></div></div></div>
     <div className="boss-arena"><div className="boss-sigil"><Mark size={55}/></div><div className="boss-caption">{question.isBoss?'BOSS ENCOUNTER':'DUNGEON GUARDIAN'} · {question.rank} RANK</div></div>
-    <div className="panel question-card"><div className="eyebrow">{question.isBoss?'Final encounter':'Field question'} / {question.questionNumber.toString().padStart(2,'0')}</div><p className="question">{question.prompt}</p><div>{question.options.map((option,i)=><button key={`${question.questionId}-${i}`} className={`option ${answerIndex===i?'chosen':''}`} disabled={!!result||answer.isPending} onClick={()=>void submit(i)} data-testid={`button-answer-${i}`}><span className="option-key">{String.fromCharCode(65+i)}</span>{option}</button>)}</div>
+    <div className="panel question-card"><div className="eyebrow">{question.isBoss?'Final encounter':'Field question'} / {question.questionNumber.toString().padStart(2,'0')}</div><p className="question">{question.prompt}</p><div>{question.options.map((option,i)=><button key={`${question.questionId}-${i}`} className={`option ${answerIndex===i?'chosen':''}`} disabled={!!result||answer.isPending||paused||(question.mode==='quick'&&runSeconds===0)} onClick={()=>void submit(i)} data-testid={`button-answer-${i}`}><span className="option-key">{String.fromCharCode(65+i)}</span>{option}</button>)}</div>
       {answer.isPending&&<p className="muted">The arena is resolving your answer…</p>}{result&&<><div className="explanation"><strong>{result.correct?'Correct move.':'Good lesson for the next run.'}</strong> {result.explanation}</div>
-        {result.completed?<div className="result-card"><div className="eyebrow" style={{justifyContent:'center'}}>Run resolved / {result.hunterRank}-Rank</div><h2>{result.levelUp?'Level up.':'You showed up.'}</h2><div className="gold-number">+{result.xpEarned} XP</div><p className="muted">Accuracy {result.accuracy}% · server-scored</p><button className="btn btn-gold" onClick={next}>Back to dungeon select <ArrowRight size={14}/></button></div>
+        {result.completed?<div className="result-card"><div className="eyebrow" style={{justifyContent:'center'}}>Run resolved / {result.hunterRank}-Rank</div><h2>{result.levelUp?'Level up.':'You showed up.'}</h2><div className="gold-number">+{result.xpEarned} XP</div><p className="muted">Accuracy {result.accuracy}% · server-scored</p><button className="btn btn-gold" onClick={next}>Back to dungeon select <ArrowRight size={14}/></button>{result.rankUp&&user&&<RankCelebration name={user.name} rank={result.hunterRank} onClose={()=>setResult(null)}/>}</div>
         :<button className="btn btn-gold" onClick={next} style={{marginTop:10}}>Next question <ChevronRight size={15}/></button>}</>}
       {error&&<div className="form-error">{error}</div>}
     </div>
@@ -247,32 +255,7 @@ function DungeonPage() {
   </Content>;
 }
 
-function DetectiveEventPage() {
-  const [secondsLeft,setSecondsLeft]=useState(60*60);
-  const [selection,setSelection]=useState('');
-  const [resolved,setResolved]=useState(false);
-  useEffect(()=>{
-    const timer=window.setInterval(()=>setSecondsLeft(seconds=>Math.max(0,seconds-1)),1000);
-    return()=>window.clearInterval(timer);
-  },[]);
-  const hours=Math.floor(secondsLeft/3600).toString().padStart(2,'0');
-  const minutes=Math.floor((secondsLeft%3600)/60).toString().padStart(2,'0');
-  const seconds=(secondsLeft%60).toString().padStart(2,'0');
-  const clues=['682 — one digit is correct and in the right place.','614 — one digit is correct, but in the wrong place.','206 — two digits are correct, both in the wrong place.','738 — no digit is correct.','780 — one digit is correct, but in the wrong place.'];
-  const options=['042','204','420','624'];
-  return <Content><PageHead kicker="Two Doors / Event branch" title="The missing cipher." copy="One hour. Five clues. Find the three-digit archive code before the witness leaves." action={<Link href="/app" className="btn btn-quiet">Leave event</Link>}/>
-    <div className="grid-2">
-      <section className="panel"><div className="panel-title"><h2>Case file 01</h2><small>LOCAL EVENT STUB</small></div><div style={{display:'flex',alignItems:'center',gap:12,margin:'8px 0 21px'}}><div className="level-disc" style={{width:82,height:82}}><div><small>TIME</small><strong style={{fontSize:19}}>{hours}:{minutes}:{seconds}</strong></div></div><div><div className="gold mono" style={{fontSize:10,letterSpacing:'.14em'}}>DETECTIVE MODE</div><p className="muted" style={{fontSize:12,lineHeight:1.7,margin:'8px 0'}}>Use each clue to eliminate digits and positions. Your answer stays on this device.</p></div></div>
-        <div className="eyebrow">Evidence board</div>{clues.map((clue,index)=><div className="list-row" key={clue}><div><span className="mono gold" style={{fontSize:10,marginRight:12}}>0{index+1}</span><strong style={{fontWeight:500}}>{clue}</strong></div></div>)}
-      </section>
-      <section className="panel"><div className="eyebrow">The question</div><h2 className="serif" style={{fontSize:30,lineHeight:1.2}}>Which code opens the archive?</h2><p className="muted" style={{fontSize:13,lineHeight:1.8}}>Every clue is exact. A digit can only appear in the code once.</p>
-        {!resolved?<div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:10,marginTop:24}}>{options.map(option=><button key={option} className={`subject-pick ${selection===option?'selected':''}`} onClick={()=>setSelection(option)} data-testid={`button-event-code-${option}`}><span className="mono" style={{fontSize:22,letterSpacing:'.2em'}}>{option}</span><small>Archive code</small></button>)}</div>:<div className="explanation"><strong>{selection==='042'?'Case solved.':'The evidence says otherwise.'}</strong> The code is 042: 7, 3 and 8 are excluded. The 0 belongs in the first position, 2 in the third, leaving 4 in the middle.</div>}
-        {!resolved?<button className="btn btn-gold" disabled={!selection||secondsLeft===0} onClick={()=>setResolved(true)} style={{marginTop:20}} data-testid="button-submit-event-answer">Submit deduction <ArrowRight size={14}/></button>:<button className="btn btn-quiet" onClick={()=>{setSelection('');setResolved(false);}} style={{marginTop:20}}>Revisit the clues</button>}
-        <p className="muted" style={{fontSize:10,marginTop:20}}>Prototype event: the one-hour clock and case are local-only. No score or event result is sent to the server.</p>
-      </section>
-    </div>
-  </Content>;
-}
+function DetectiveEventPage() { return <ServerEventPage/>; }
 
 function TutorPage(){
   const ask=useAskTutor();const [messages,setMessages]=useState<{role:'assistant'|'user';text:string}[]>([{role:'assistant',text:'Welcome to the field, Hunter. I am here to help you find the next step—not hand you a shortcut. What are you working through?'}]);const [text,setText]=useState('');const [subject,setSubject]=useState('');const [error,setError]=useState('');
@@ -294,7 +277,7 @@ function TournamentsPage(){
   const [answerResult,setAnswerResult]=useState<TournamentAnswer|null>(null);
   const [selectedAnswer,setSelectedAnswer]=useState<number|null>(null);
   const [secondsLeft,setSecondsLeft]=useState(0);
-  const [notice,setNotice]=useState('');
+  const [notice,setNotice]=useState(()=>new URLSearchParams(window.location.search).has('checkout')?'Payment is awaiting server verification. Your entry will remain unconfirmed until the payment provider confirms it.':'');
   const activeTournament=data?.find(t=>t.id===activeId);
   const standings=useGetTournamentLeaderboard(activeId??'',{query:{queryKey:getGetTournamentLeaderboardQueryKey(activeId??''),enabled:Boolean(activeId),refetchInterval:5000}});
 
@@ -320,6 +303,12 @@ function TournamentsPage(){
     }
     try{
       const response=await join.mutateAsync({tournamentId:t.id});
+      if(t.paid){
+        if(response.checkoutUrl){window.location.assign(response.checkoutUrl);return;}
+        setNotice(response.message||`Payment status: ${response.paymentStatus}. Entry is not confirmed until provider verification.`);
+        void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
+        return;
+      }
       setNotice(response.message||`Entry status: ${response.paymentStatus}`);
       setActiveId(t.id);
       void qc.invalidateQueries({queryKey:getGetTournamentsQueryKey()});
@@ -377,15 +366,15 @@ function TournamentsPage(){
   },[activeQuestion?.questionId,answerResult]);
   const formatTime=(value:number)=>`${Math.floor(value/60).toString().padStart(2,'0')}:${(value%60).toString().padStart(2,'0')}`;
 
-  return <Content><PageHead kicker="Live arena" title="Play for the climb." copy="Join a free or paid event, then work through three server-timed rounds. Paid entries use mock billing; no real money is collected."/>
+  return <Content><PageHead kicker="Live arena" title="Play for the climb." copy="Join a free or paid event, then work through three server-timed rounds. A paid entry stays pending until its payment is verified."/>
     {notice&&<div className="error-banner" role="status">{notice}</div>}
     {isLoading?<Loading/>:isError?<LoadError retry={()=>void refetch()}/>:!data?.length?<div className="empty-state"><strong>The arena is between rounds</strong>New events will show up here when they open.</div>:<div style={{display:'grid',gap:13}}>{data.map(t=><article className="panel tournament-card" key={t.id}>
-      <div><span className={`tag ${t.paid?'':'muted-tag'}`}>{t.paid?`Entry ${t.entryFeeEtb} ETB`:'Free entry'}</span>{t.completed&&<span className="tag" style={{marginLeft:7}}>COMPLETE</span>}
-        <h3>{t.name}</h3><div className="tournament-stats"><span>SUBJECT<b>{t.subject}</b></span><span>PLAYERS<b>{t.participants.toLocaleString()}</b></span><span>PRIZE POOL<b>{t.prizePoolEtb.toLocaleString()} ETB</b></span><span>ROUNDS<b>{t.totalRounds} · E / C / A</b></span></div>
+      <div><span className={`tag ${t.paid?'':'muted-tag'}`}>{t.paid?`Entry ${t.entryFeeEtb||50} ETB`:'Free entry'}</span>{t.completed&&<span className="tag" style={{marginLeft:7}}>COMPLETE</span>}
+        <h3>{t.name}</h3><div className="tournament-stats"><span>SUBJECT<b>{t.subject}</b></span><span>PLAYERS<b>{t.participants.toLocaleString()} / {t.capacity}</b></span><span>PRIZE POOL<b>{t.prizePoolEtb.toLocaleString()} ETB</b></span><span>ROUNDS<b>{t.totalRounds} · E / C / A</b></span></div>
         {t.payoutBreakdown?.length>0&&<p className="muted" style={{fontSize:11,marginBottom:0}}>Rewards · {t.payoutBreakdown.join(' / ')}</p>}
       </div><div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
         <button className="btn btn-quiet" style={{padding:'9px 12px'}} onClick={()=>{setActiveId(t.id);setActiveQuestion(null);setAnswerResult(null);}} data-testid={`button-standings-${t.id}`}>Standings</button>
-        <button className="btn btn-gold" onClick={()=>void enter(t)} disabled={join.isPending||startRound.isPending} data-testid={`button-join-${t.id}`}>{join.isPending?'Entering…':!t.joined?(t.paid?'Enter · mock payment':'Join free event'):t.completed?'View final board':'Start / resume'} <ArrowRight size={14}/></button>
+        <button className="btn btn-gold" onClick={()=>void enter(t)} disabled={join.isPending||startRound.isPending||t.isFull&&!t.joined} data-testid={`button-join-${t.id}`}>{join.isPending?'Opening checkout…':!t.joined?(t.paid?'Checkout · ETB 50':'Join free event'):t.completed?'View final board':'Start / resume'} <ArrowRight size={14}/></button>
       </div>
     </article>)}</div>}
 
@@ -444,12 +433,13 @@ function TeacherPage(){
 
 function SubscriptionPage(){
   const {data:current,isLoading,isError,refetch}=useGetSubscription();const {data:user}=useGetCurrentUser();const select=useSelectSubscription();const qc=useQueryClient();const [notice,setNotice]=useState('');
-  async function choose(tier:'free'|'arena'|'institution'){setNotice('');try{const s=await select.mutateAsync({data:{tier}});qc.setQueryData(getGetSubscriptionQueryKey(),s);setNotice(`Your ${s.tier} plan is selected. Billing status: ${s.billingStatus}.`);}catch(e){setNotice(e instanceof Error?e.message:'Could not update your plan.');}}
-  const plans=[{tier:'free' as const,name:'Free path',price:'0',detail:'Get in, get moving.',features:['Daily dungeon runs','Subject mastery map','Tutor game-master chat']},{tier:'arena' as const,name:'Arena',price:'150 ETB',detail:'For hunters building a steady streak.',features:['Everything in Free','Tournament entry access','Expanded practice sessions'],featured:true},{tier:'institution' as const,name:'Institution',price:'School plan',detail:'A shared field for a school.',features:['Teacher class tools','Assignments and join codes','School-wide progress view']}].filter(p=>p.tier!=='institution'||user?.role==='teacher');
+  useEffect(()=>{if(new URLSearchParams(window.location.search).has('checkout'))setNotice('Checkout returned. Access remains pending until the provider verifies payment.');},[]);
+  async function choose(tier:'free'|'arena'|'institution'){setNotice('');try{const s=await select.mutateAsync({data:{tier}});qc.setQueryData(getGetSubscriptionQueryKey(),s);if(tier==='arena'){if(s.checkoutUrl){window.location.assign(s.checkoutUrl);return;}setNotice(`Verification pending · ${s.billingStatus}. Arena access is granted only after provider confirmation.`);return;}setNotice(`Your ${s.tier} plan selection is saved. Billing status: ${s.billingStatus}.`);}catch(e){setNotice(e instanceof Error?e.message:'Could not update your plan.');}}
+  const plans=[{tier:'free' as const,name:'Free path',price:'0 ETB',detail:'Get in, get moving.',features:['Daily dungeon runs','Subject mastery map','Tutor game-master chat']},{tier:'arena' as const,name:'Arena Pass',price:current?.tier==='arena'&&current.priceEtb?`${current.priceEtb} ETB`:'Checkout price confirmed by Nexora',detail:'For hunters who want the full arena.',features:['Everything in Free','Tournament entry access','Expanded practice sessions'],featured:true},{tier:'institution' as const,name:'Institution',price:'School plan',detail:'A shared field for a school.',features:['Teacher class tools','Assignments and join codes','School-wide progress view']}].filter(p=>p.tier!=='institution'||user?.role==='teacher');
   return <Content><PageHead kicker="Choose your pace" title="Room to go further." copy="A plan should open doors—not add pressure. Start with the path that fits today."/>
-    {isLoading?<Loading/>:isError?<LoadError retry={()=>void refetch()}/>:<div className="panel" style={{marginBottom:17}}>Current plan <strong className="gold" style={{marginLeft:10}}>{current?.tier??'Free'}</strong><span className="muted" style={{marginLeft:10}}>· {current?.billingStatus??'ready'}</span>{current?.priceEtb ? <span className="mono" style={{marginLeft:10}}>{current.priceEtb} ETB</span>:null}</div>}
+    {isLoading?<Loading/>:isError?<LoadError retry={()=>void refetch()}/>:<div className="panel" style={{marginBottom:17}}><div className="panel-title"><h2>Current plan · <span className="gold">{current?.tier??'Free'}</span></h2><small>{current?.billingStatus??'READY'}</small></div><p className="muted">The checkout return never activates access by itself. Nexora verifies payment with the provider.</p><div className="payment-period"><span>Period ends <strong>{current?.currentPeriodEnd?new Date(current.currentPeriodEnd).toLocaleString():'Not active'}</strong></span><span>Grace ends <strong>{current?.graceEndsAt?new Date(current.graceEndsAt).toLocaleString():'No grace period'}</strong></span><span>Renewal due <strong>{current?.renewalDueAt?new Date(current.renewalDueAt).toLocaleString():'Not scheduled'}</strong></span></div><Link href="/payments" className="btn btn-quiet" style={{marginTop:15}}>View payment history <ArrowRight size={14}/></Link></div>}
     {notice&&<div className="error-banner" role="status">{notice}</div>}
-    <div className="grid-3">{plans.map(p=><article className={`panel plan-card ${p.featured?'featured':''}`} key={p.tier}>{p.featured&&<span className="tag"><Crown size={11} style={{verticalAlign:'middle',marginRight:4}}/>MOST POPULAR</span>}<h3>{p.name}</h3><p>{p.detail}</p><div className="price">{p.price==='0'?'0 ETB':p.price}<small className="muted" style={{font:'11px var(--app-font-sans)'}}>{p.price==='0'?'':' / month'}</small></div><ul>{p.features.map(f=><li key={f}>{f}</li>)}</ul><button className={p.featured?'btn btn-gold':'btn btn-quiet'} onClick={()=>void choose(p.tier)} disabled={select.isPending||current?.tier===p.tier} data-testid={`button-plan-${p.tier}`}>{current?.tier===p.tier?'Current plan':select.isPending?'Updating…':p.tier==='institution'?'Choose institution':'Select plan'} <ArrowRight size={14}/></button></article>)}</div>
+    <div className="grid-3">{plans.map(p=><article className={`panel plan-card ${p.featured?'featured':''}`} key={p.tier}>{p.featured&&<span className="tag"><Crown size={11} style={{verticalAlign:'middle',marginRight:4}}/>ARENA ACCESS</span>}<h3>{p.name}</h3><p>{p.detail}</p><div className="price">{p.price}<small className="muted" style={{font:'11px var(--app-font-sans)'}}>{p.tier==='arena'?' · period details shown above':''}</small></div><ul>{p.features.map(f=><li key={f}>{f}</li>)}</ul><button className={p.featured?'btn btn-gold':'btn btn-quiet'} onClick={()=>void choose(p.tier)} disabled={select.isPending||current?.tier===p.tier} data-testid={`button-plan-${p.tier}`}>{current?.tier===p.tier?'Current plan':select.isPending?'Opening checkout…':p.tier==='institution'?'Choose institution':p.tier==='arena'?'Continue to secure checkout':'Select plan'} <ArrowRight size={14}/></button></article>)}</div>
   </Content>;
 }
 
@@ -499,10 +489,12 @@ function Router(){
     <Route path="/onboarding"><Authenticated roles={STUDENT_ROLES}><Onboarding/></Authenticated></Route>
     <Route path="/app"><Authenticated roles={STUDENT_ROLES}><DashboardPage/></Authenticated></Route><Route path="/dungeon"><Authenticated roles={STUDENT_ROLES}><DungeonPage/></Authenticated></Route>
     <Route path="/event"><Authenticated roles={STUDENT_ROLES}><DetectiveEventPage/></Authenticated></Route>
+    <Route path="/payments"><Authenticated roles={MEMBER_ROLES}><StudentPaymentsPage/></Authenticated></Route>
     <Route path="/tutor"><Authenticated roles={STUDENT_ROLES}><TutorPage/></Authenticated></Route><Route path="/tournaments"><Authenticated roles={STUDENT_ROLES}><TournamentsPage/></Authenticated></Route>
     <Route path="/leaderboard"><Authenticated><LeaderboardPage/></Authenticated></Route>
     <Route path="/teacher"><Authenticated roles={TEACHER_ROLES}><TeacherPage/></Authenticated></Route>
     <Route path="/admin"><Authenticated roles={ADMIN_ROLES}><AdminPage/></Authenticated></Route>
+    <Route path="/admin/payments"><Authenticated roles={ADMIN_ROLES}><AdminPaymentsPage/></Authenticated></Route>
     <Route path="/subscription"><Authenticated roles={MEMBER_ROLES}><SubscriptionPage/></Authenticated>
     </Route><Route component={NotFound}/>
   </Switch></RoutedErrorBoundary>;

@@ -159,23 +159,18 @@ export function verifyChapaWebhookSignature(input: {
 }): boolean {
   const secret = input.secret ?? process.env.CHAPA_WEBHOOK_SECRET;
   if (!secret) return false;
-  const candidates: string[] = [];
-  if (input.xChapaSignature) {
-    candidates.push(createHmac("sha256", secret).update(input.rawBody).digest("hex"));
-  }
-  if (input.chapaSignature) {
-    candidates.push(createHmac("sha256", secret).update(secret).digest("hex"));
-  }
-  const provided = [input.xChapaSignature, input.chapaSignature]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => value.replace(/^sha256=/i, "").trim().toLowerCase());
-  return candidates.some((expected) =>
-    provided.some((actual) => {
-      const expectedBuffer = Buffer.from(expected, "hex");
-      const actualBuffer = Buffer.from(actual, "hex");
-      return expectedBuffer.length === actualBuffer.length && timingSafeEqual(expectedBuffer, actualBuffer);
-    }),
-  );
+  const matches = (expected: string, supplied?: string) => {
+    if (!supplied) return false;
+    const normalized = supplied.replace(/^sha256=/i, "").trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(normalized)) return false;
+    const expectedBuffer = Buffer.from(expected, "hex");
+    const suppliedBuffer = Buffer.from(normalized, "hex");
+    return expectedBuffer.length === suppliedBuffer.length && timingSafeEqual(expectedBuffer, suppliedBuffer);
+  };
+  const rawBodySignature = createHmac("sha256", secret).update(input.rawBody).digest("hex");
+  const secretSignature = createHmac("sha256", secret).update(secret).digest("hex");
+  return matches(rawBodySignature, input.xChapaSignature)
+    || matches(secretSignature, input.chapaSignature);
 }
 
 export function transactionMatchesPayment(
@@ -197,4 +192,24 @@ export async function applySuccessfulPaymentOnce(input: {
   if (!claimed) return false;
   await input.apply();
   return true;
+}
+
+export async function processConfirmedChapaPayment(input: {
+  transaction: ChapaTransaction;
+  paymentStatus: string;
+  expected: { txRef: string; amountEtb: number; currency?: string };
+  claim: () => Promise<boolean>;
+  apply: () => Promise<void>;
+}): Promise<{ accepted: boolean; duplicate: boolean }> {
+  if (!transactionMatchesPayment(input.transaction, input.expected)) {
+    return { accepted: false, duplicate: false };
+  }
+  if (["successful", "refund_pending", "refunded"].includes(input.paymentStatus)) {
+    return { accepted: true, duplicate: true };
+  }
+  const applied = await applySuccessfulPaymentOnce({
+    claim: input.claim,
+    apply: input.apply,
+  });
+  return { accepted: true, duplicate: !applied };
 }

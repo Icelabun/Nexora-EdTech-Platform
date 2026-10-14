@@ -3,13 +3,13 @@ import rateLimit from "express-rate-limit";
 import {
   CancelTournamentParams,
   CancelTournamentResponse,
+  ChapaWebhookResponse,
   GetPaymentHistoryResponse,
   GetSubscriptionResponse,
   RefundPaymentParams,
   RefundPaymentResponse,
   SelectSubscriptionBody,
   SelectSubscriptionResponse,
-  WebhookAcknowledgement,
 } from "@workspace/api-zod";
 import {
   authenticatedUserId,
@@ -34,7 +34,7 @@ import {
   ChapaApiError,
   PaymentConfigurationError,
   paymentProvider,
-  transactionMatchesPayment,
+  processConfirmedChapaPayment,
   verifyChapaWebhookSignature,
 } from "../lib/nexora-payments";
 import { sweepExpiredSubscriptions } from "../lib/nexora-subscriptions";
@@ -84,21 +84,17 @@ async function recordSubscriptionFailure(payment: any): Promise<void> {
   const user = await UserModel.findById(payment.userId);
   if (!user || user.subscriptionTier !== "arena") return;
   const subscription = await SubscriptionModel.findOne({ userId: user._id });
-  const graceEndsAt = addGracePeriod();
+  const now = new Date();
+  const graceStartsAt = subscription?.currentPeriodEnd && subscription.currentPeriodEnd > now
+    ? subscription.currentPeriodEnd
+    : now;
+  const graceEndsAt = addGracePeriod(graceStartsAt);
   await SubscriptionModel.updateOne(
     { userId: user._id, tier: "arena" },
     { $set: { billingStatus: "past_due", graceEndsAt } },
   );
   user.arenaAccessUntil = graceEndsAt;
   await user.save();
-  if (subscription && subscription.currentPeriodEnd && subscription.currentPeriodEnd > graceEndsAt) {
-    await SubscriptionModel.updateOne(
-      { userId: user._id },
-      { $set: { graceEndsAt: subscription.currentPeriodEnd } },
-    );
-    user.arenaAccessUntil = subscription.currentPeriodEnd;
-    await user.save();
-  }
 }
 
 async function applyConfirmedPayment(payment: any): Promise<"successful" | "refund_pending" | "refund_failed"> {
@@ -156,20 +152,20 @@ async function applyConfirmedPayment(payment: any): Promise<"successful" | "refu
       );
       return "successful";
     }
-    const seat = await TournamentModel.findOneAndUpdate(
-      {
-        _id: payment.relatedTournamentId,
-        active: true,
-        cancelledAt: null,
-        $expr: { $lt: ["$participantCount", "$capacity"] },
-        processedPaymentIds: { $ne: payment._id },
-      },
-      {
-        $inc: { participantCount: 1 },
-        $addToSet: { processedPaymentIds: payment._id },
-      },
-      { new: true },
-    );
+    const seat = entry ? await TournamentModel.findOneAndUpdate(
+        {
+          _id: payment.relatedTournamentId,
+          active: true,
+          cancelledAt: null,
+          $expr: { $lt: ["$participantCount", "$capacity"] },
+          processedPaymentIds: { $ne: payment._id },
+        },
+        {
+          $inc: { participantCount: 1 },
+          $addToSet: { processedPaymentIds: payment._id },
+        },
+        { new: true },
+      ) : null;
     if (seat && entry) {
       await TournamentEntryModel.updateOne(
         { _id: entry._id },
@@ -324,7 +320,6 @@ router.post("/subscriptions", requireNexoraAuth, async (req, res): Promise<void>
       { userId },
       {
         $set: {
-          userId,
           priceEtb: monthlyArenaPriceEtb,
           billingStatus: user.subscriptionTier === "arena" ? "active" : "pending-payment",
           renewalCheckoutUrl: payment.checkoutUrl,
@@ -385,14 +380,14 @@ router.post("/payments/chapa/webhook", webhookLimiter, async (req, res): Promise
   const payment = await PaymentModel.findOne({ txRef });
   if (!payment) {
     req.log.warn({ txRef }, "Signed Chapa webhook did not match a Nexora payment.");
-    res.json(WebhookAcknowledgement.parse({ received: true, duplicate: false }));
+    res.json(ChapaWebhookResponse.parse({ received: true, duplicate: false }));
     return;
   }
 
   if (eventType === "charge.refunded") {
     try {
       const verified = await finishRefundWebhook(payment, data);
-      res.json(WebhookAcknowledgement.parse({ received: true, duplicate: !verified }));
+      res.json(ChapaWebhookResponse.parse({ received: true, duplicate: !verified }));
     } catch (error) {
       req.log.error({ err: error, paymentId: String(payment._id) }, "Could not verify Chapa refund webhook.");
       res.status(503).json({ error: "Refund status could not be verified yet." });
@@ -415,37 +410,31 @@ router.post("/payments/chapa/webhook", webhookLimiter, async (req, res): Promise
       }
       if (updated.purpose === "arena-monthly-subscription") await recordSubscriptionFailure(updated);
     }
-    res.json(WebhookAcknowledgement.parse({ received: true, duplicate: !updated }));
+    res.json(ChapaWebhookResponse.parse({ received: true, duplicate: !updated }));
     return;
   }
 
   if (eventType !== "charge.success") {
-    res.json(WebhookAcknowledgement.parse({ received: true, duplicate: false }));
+    res.json(ChapaWebhookResponse.parse({ received: true, duplicate: false }));
     return;
   }
   if (payment.status === "successful" || payment.status === "refund_pending" || payment.status === "refunded") {
-    res.json(WebhookAcknowledgement.parse({ received: true, duplicate: true }));
+    res.json(ChapaWebhookResponse.parse({ received: true, duplicate: true }));
     return;
   }
   try {
     const verified = await paymentProvider.verifyTransaction(txRef);
-    if (!transactionMatchesPayment(verified, { txRef, amountEtb: Number(payment.amountEtb), currency: "ETB" })) {
-      req.log.warn(
-        { txRef, verifiedStatus: verified.status, verifiedAmount: verified.amount, verifiedCurrency: verified.currency },
-        "Chapa webhook transaction did not match the pending Nexora payment.",
-      );
-      res.status(422).json({ error: "The verified transaction does not match the expected payment." });
-      return;
-    }
-    const staleProcessingTime = new Date(Date.now() - 2 * 60 * 1000);
     let finalStatus: "successful" | "refund_pending" | "refund_failed" = "successful";
-    const applied = await applySuccessfulPaymentOnce({
+    const processed = await processConfirmedChapaPayment({
+      transaction: verified,
+      paymentStatus: payment.status,
+      expected: { txRef, amountEtb: Number(payment.amountEtb), currency: "ETB" },
       claim: async () => Boolean(await PaymentModel.findOneAndUpdate(
         {
           _id: payment._id,
           $or: [
-            { status: "pending" },
-            { status: "processing", updatedAt: { $lte: staleProcessingTime } },
+            { status: { $in: ["pending", "failed", "cancelled"] } },
+            { status: "processing", updatedAt: { $lte: new Date(Date.now() - 2 * 60 * 1000) } },
           ],
         },
         {
@@ -465,7 +454,15 @@ router.post("/payments/chapa/webhook", webhookLimiter, async (req, res): Promise
         );
       },
     });
-    res.json(WebhookAcknowledgement.parse({ received: true, duplicate: !applied }));
+    if (!processed.accepted) {
+      req.log.warn(
+        { txRef, verifiedStatus: verified.status, verifiedAmount: verified.amount, verifiedCurrency: verified.currency },
+        "Chapa webhook transaction did not match the pending Nexora payment.",
+      );
+      res.status(422).json({ error: "The verified transaction does not match the expected payment." });
+      return;
+    }
+    res.json(ChapaWebhookResponse.parse({ received: true, duplicate: processed.duplicate }));
   } catch (error) {
     await PaymentModel.updateOne(
       { _id: payment._id, status: "processing" },
